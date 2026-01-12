@@ -1,23 +1,20 @@
 import streamlit as st
 import pandas as pd
 from datetime import datetime
-import sqlite3
+from streamlit_gsheets import GSheetsConnection
 
-# Configuración de la página
-st.set_page_config(page_title="Cena Mamá - Caja", page_icon="🛍️")
+# 1. Configuración de la página
+st.set_page_config(page_title="Cena Mamá - Google Sheets", page_icon="📊")
 
-# Conectar a la base de datos
-conn = sqlite3.connect('ventas_familia.db', check_same_thread=False)
-c = conn.cursor()
-c.execute('''CREATE TABLE IF NOT EXISTS ventas 
-             (id INTEGER PRIMARY KEY AUTOINCREMENT, detalle TEXT, total REAL, fecha TEXT)''')
-conn.commit()
+# 2. Conexión con Google Sheets
+# Nota: El link de tu hoja lo pondremos en los "Secrets" de Streamlit después
+conn = st.connection("gsheets", type=GSheetsConnection)
 
-# --- ESTA ES LA MEMORIA DEL CARRITO ---
+# --- MEMORIA DEL CARRITO ---
 if 'carrito' not in st.session_state:
     st.session_state.carrito = []
 
-# Precios actuales
+# Precios y Guisos
 PRECIOS = {
     "Huarache": 60.0,
     "Quesadilla": 35.0,
@@ -28,16 +25,15 @@ PRECIOS = {
 }
 GUISOS = ["Tinga", "Picadillo", "Papa con Longaniza", "Nopales", "Frijol", "Queso"]
 
-st.title("🛍️ Carrito de Ventas")
+st.title("🛍️ Pedidos con Google Sheets")
 
-# --- SECCIÓN 1: AGREGAR AL CARRITO ---
-with st.expander("🛒 Añadir producto a la cuenta", expanded=True):
+# --- SECCIÓN: AÑADIR AL CARRITO ---
+with st.container(border=True):
     producto = st.selectbox("¿Qué producto es?", list(PRECIOS.keys()))
     
     # Lógica de guiso para la gordita
     if producto == "Gordita de Chicharrón":
         guiso = "Chicharrón"
-        st.info("Gordita seleccionada (Solo Chicharrón)")
     elif producto in ["Refresco", "Café"]:
         guiso = "N/A"
     else:
@@ -45,57 +41,38 @@ with st.expander("🛒 Añadir producto a la cuenta", expanded=True):
         
     cantidad = st.number_input("¿Cuántos son?", min_value=1, value=1, step=1)
     
-    if st.button("➕ AGREGAR AL CARRITO", use_container_width=True):
-        costo_item = PRECIOS[producto] * cantidad
-        nombre_item = f"{cantidad}x {producto} ({guiso})" if guiso != "N/A" else f"{cantidad}x {producto}"
-        
-        # Agregamos a la lista de la memoria
-        st.session_state.carrito.append({"nombre": nombre_item, "precio": costo_item})
-        st.toast(f"Agregado: {nombre_item}")
+    if st.button("➕ AGREGAR A LA CUENTA", use_container_width=True):
+        costo = PRECIOS[producto] * cantidad
+        nombre = f"{cantidad}x {producto} ({guiso})" if guiso != "N/A" else f"{cantidad}x {producto}"
+        st.session_state.carrito.append({"Fecha": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "Detalle": nombre, "Total": costo})
+        st.toast("Agregado")
 
-# --- SECCIÓN 2: MOSTRAR EL CARRITO Y COBRAR ---
+# --- SECCIÓN: TICKET Y ENVÍO A GOOGLE ---
 if st.session_state.carrito:
-    st.write("### 📝 Cuenta actual de la mesa")
+    st.write("### 📝 Cuenta actual")
+    df_actual = pd.DataFrame(st.session_state.carrito)
+    st.table(df_actual[["Detalle", "Total"]])
     
-    # Crear una tablita para que se vea ordenado
-    df_carrito = pd.DataFrame(st.session_state.carrito)
-    st.table(df_carrito)
-    
-    total_venta = df_carrito['precio'].sum()
-    st.write(f"## TOTAL A COBRAR: ${total_venta}")
+    total_venta = df_actual['Total'].sum()
+    st.write(f"## TOTAL: ${total_venta}")
 
-    col1, col2 = st.columns(2)
-    with col1:
-        if st.button("🗑️ VACÍAR CARRITO", use_container_width=True):
-            st.session_state.carrito = []
-            st.rerun()
-            
-    with col2:
-        if st.button("💰 COBRAR AHORA", type="primary", use_container_width=True):
-            # Guardamos todo el pedido en el historial (Base de Datos)
-            resumen_final = " / ".join(df_carrito['nombre'].tolist())
-            fecha_hoy = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            
-            c.execute("INSERT INTO ventas (detalle, total, fecha) VALUES (?, ?, ?)", 
-                      (resumen_final, total_venta, fecha_hoy))
-            conn.commit()
-            
-            # Limpiamos el carrito para el siguiente cliente
-            st.session_state.carrito = []
-            st.success("¡Venta guardada con éxito!")
-            st.balloons()
-            st.rerun()
+    if st.button("💰 FINALIZAR Y GUARDAR EN EXCEL", type="primary", use_container_width=True):
+        # 1. Leer lo que ya hay en el Excel
+        existentes = conn.read(worksheet="Hoja 1")
+        
+        # 2. Combinar lo nuevo con lo viejo
+        actualizado = pd.concat([existentes, df_actual], ignore_index=True)
+        
+        # 3. Guardar de nuevo en Google Sheets
+        conn.update(worksheet="Hoja 1", data=actualizado)
+        
+        st.session_state.carrito = []
+        st.success("¡Venta guardada en Google Sheets!")
+        st.balloons()
+        st.rerun()
 
-# --- SECCIÓN 3: HISTORIAL DEL DÍA ---
+# --- VER HISTORIAL DESDE GOOGLE ---
 st.divider()
-st.subheader("📊 Resumen de la noche")
-df_historial = pd.read_sql_query("SELECT * FROM ventas", conn)
-
-if not df_historial.empty:
-    df_historial['fecha'] = pd.to_datetime(df_historial['fecha'])
-    hoy = datetime.now().date()
-    ventas_hoy = df_historial[df_historial['fecha'].dt.date == hoy]
-    
-    st.metric("Total en Caja", f"${ventas_hoy['total'].sum()}")
-    if st.checkbox("Ver historial detallado"):
-        st.dataframe(ventas_hoy.sort_values(by='fecha', ascending=False))
+if st.checkbox("Ver historial de ventas (Excel)"):
+    datos_excel = conn.read(worksheet="Hoja 1")
+    st.dataframe(datos_excel.sort_index(ascending=False))
