@@ -3,15 +3,19 @@ import pandas as pd
 from datetime import datetime
 import sqlite3
 
-# Configuración
-st.set_page_config(page_title="Ventas Cena", page_icon="🌮")
+# Configuración básica
+st.set_page_config(page_title="Cena Mamá", page_icon="🌮")
 
-# Base de datos
+# Conectar Base de Datos
 conn = sqlite3.connect('ventas_familia.db', check_same_thread=False)
 c = conn.cursor()
 c.execute('''CREATE TABLE IF NOT EXISTS ventas 
-             (id INTEGER PRIMARY KEY AUTOINCREMENT, antojito TEXT, guiso TEXT, total REAL, fecha TEXT)''')
+             (id INTEGER PRIMARY KEY AUTOINCREMENT, detalle TEXT, total REAL, fecha TEXT)''')
 conn.commit()
+
+# Memoria temporal para la cuenta de una mesa
+if 'carrito' not in st.session_state:
+    st.session_state.carrito = []
 
 # --- PRECIOS ---
 PRECIOS = {
@@ -22,46 +26,64 @@ PRECIOS = {
     "Refresco": 20.0,
     "Café": 15.0
 }
+GUISOS = ["Tinga", "Picadillo", "Papa con Longaniza", "Nopales", "Frijol", "Queso"]
 
-GUISOS_LISTA = ["Tinga", "Picadillo", "Papa con Longaniza", "Nopales", "Frijol", "Queso"]
+st.title("🌮 Sistema de Cobro")
 
-st.title("🌮 Control de Ventas")
-
+# --- AREA DE PEDIDO ---
 with st.container(border=True):
-    antojito = st.selectbox("1. Selecciona Producto:", list(PRECIOS.keys()))
+    producto = st.selectbox("1. ¿Qué producto es?", list(PRECIOS.keys()))
     
-    # LÓGICA INTELIGENTE:
-    # Si es gordita, el guiso es chicharrón fijo.
-    # Si es bebida, no hay guiso.
-    # Si es otra cosa, pregunta el guiso.
+    # LÓGICA DE BLOQUEO TOTAL:
+    guiso_elegido = ""
     
-    if antojito == "Gordita de Chicharrón":
-        guiso = "Chicharrón"
-        st.success("✅ Incluye Chicharrón automáticamente")
-    elif antojito in ["Refresco", "Café"]:
-        guiso = "N/A"
+    # Si NO es gordita y NO es bebida, entonces SÍ muestra los guisos
+    if producto != "Gordita de Chicharrón" and producto not in ["Refresco", "Café"]:
+        guiso_elegido = st.selectbox("2. ¿De qué guiso?", GUISOS)
+    elif producto == "Gordita de Chicharrón":
+        guiso_elegido = "Chicharrón"
+        st.info("✨ Gordita: Solo de Chicharrón (Opción fija)")
     else:
-        guiso = st.selectbox("2. Selecciona Guiso:", GUISOS_LISTA)
-            
-    cantidad = st.number_input("3. Cantidad:", min_value=1, value=1)
-    total = PRECIOS[antojito] * cantidad
-    
-    if st.button(f"COBRAR ${total}", use_container_width=True, type="primary"):
-        fecha = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        c.execute("INSERT INTO ventas (antojito, guiso, total, fecha) VALUES (?, ?, ?, ?)",
-                  (antojito, guiso, total, fecha))
-        conn.commit()
-        st.balloons() # Animación de éxito
-        st.rerun()
+        guiso_elegido = "N/A"
 
-# --- HISTORIAL ---
+    cantidad = st.number_input("3. ¿Cuántos?", min_value=1, value=1)
+    
+    if st.button("➕ AGREGAR A LA CUENTA", use_container_width=True):
+        subtotal = PRECIOS[producto] * cantidad
+        texto = f"{cantidad}x {producto}" if guiso_elegido in ["N/A", "Chicharrón"] else f"{cantidad}x {producto} de {guiso_elegido}"
+        st.session_state.carrito.append({"item": texto, "p": subtotal})
+
+# --- MOSTRAR LA CUENTA DE LA MESA ---
+if st.session_state.carrito:
+    st.write("---")
+    st.subheader("📝 Cuenta de la Mesa")
+    total_mesa = 0
+    for i in st.session_state.carrito:
+        st.write(f"✅ {i['item']} --- ${i['p']}")
+        total_mesa += i['p']
+    
+    st.write(f"## Total a pagar: ${total_mesa}")
+
+    c1, c2 = st.columns(2)
+    with c1:
+        if st.button("🗑️ Limpiar Mesa"):
+            st.session_state.carrito = []
+            st.rerun()
+    with c2:
+        if st.button("💰 REGISTRAR COBRO", type="primary"):
+            resumen = " + ".join([x['item'] for x in st.session_state.carrito])
+            fecha = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            c.execute("INSERT INTO ventas (detalle, total, fecha) VALUES (?, ?, ?)", (resumen, total_mesa, fecha))
+            conn.commit()
+            st.session_state.carrito = []
+            st.success("¡Venta guardada en el historial!")
+            st.balloons()
+            st.rerun()
+
+# --- REPORTE DE DINERO ---
 st.divider()
-st.subheader("📊 Total de hoy")
 df = pd.read_sql_query("SELECT * FROM ventas", conn)
 if not df.empty:
     df['fecha'] = pd.to_datetime(df['fecha'])
-    hoy = datetime.now().date()
-    ventas_hoy = df[df['fecha'].dt.date == hoy]
-    st.metric("Dinero en Caja", f"${ventas_hoy['total'].sum()}")
-    with st.expander("Ver detalles"):
-        st.table(ventas_hoy[['antojito', 'guiso', 'total']].tail(10)) # Muestra las últimas 10 ventas
+    ventas_hoy = df[df['fecha'].dt.date == datetime.now().date()]
+    st.metric("💵 Total en Caja (Hoy)", f"${ventas_hoy['total'].sum()}")
