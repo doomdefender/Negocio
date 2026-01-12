@@ -3,20 +3,21 @@ import pandas as pd
 from datetime import datetime
 import sqlite3
 
-# 1. CONFIGURACIÓN Y BASE DE DATOS
-st.set_page_config(page_title="Cena Mamá", page_icon="🌮")
+# Configuración de la página
+st.set_page_config(page_title="Cena Mamá - Caja", page_icon="🛍️")
 
+# Conectar a la base de datos
 conn = sqlite3.connect('ventas_familia.db', check_same_thread=False)
 c = conn.cursor()
 c.execute('''CREATE TABLE IF NOT EXISTS ventas 
              (id INTEGER PRIMARY KEY AUTOINCREMENT, detalle TEXT, total REAL, fecha TEXT)''')
 conn.commit()
 
-# --- LA MEMORIA DE LA APP (CARRITO) ---
+# --- ESTA ES LA MEMORIA DEL CARRITO ---
 if 'carrito' not in st.session_state:
     st.session_state.carrito = []
 
-# --- PRECIOS Y GUISOS ---
+# Precios actuales
 PRECIOS = {
     "Huarache": 60.0,
     "Quesadilla": 35.0,
@@ -27,69 +28,74 @@ PRECIOS = {
 }
 GUISOS = ["Tinga", "Picadillo", "Papa con Longaniza", "Nopales", "Frijol", "Queso"]
 
-st.title("🏪 Punto de Venta")
+st.title("🛍️ Carrito de Ventas")
 
-# --- AREA DE SELECCIÓN ---
-with st.form("selector_producto", clear_on_submit=True):
-    st.write("### Añadir Producto")
+# --- SECCIÓN 1: AGREGAR AL CARRITO ---
+with st.expander("🛒 Añadir producto a la cuenta", expanded=True):
     producto = st.selectbox("¿Qué producto es?", list(PRECIOS.keys()))
     
-    # Lógica de la Gordita (Solo Chicharrón)
+    # Lógica de guiso para la gordita
     if producto == "Gordita de Chicharrón":
         guiso = "Chicharrón"
-        st.info("Gordita seleccionada: Solo de Chicharrón")
+        st.info("Gordita seleccionada (Solo Chicharrón)")
     elif producto in ["Refresco", "Café"]:
         guiso = "N/A"
     else:
         guiso = st.selectbox("¿De qué guiso?", GUISOS)
         
-    cantidad = st.number_input("Cantidad:", min_value=1, value=1, step=1)
+    cantidad = st.number_input("¿Cuántos son?", min_value=1, value=1, step=1)
     
-    boton_agregar = st.form_submit_state = st.form_submit_button("➕ AGREGAR A LA LISTA")
+    if st.button("➕ AGREGAR AL CARRITO", use_container_width=True):
+        costo_item = PRECIOS[producto] * cantidad
+        nombre_item = f"{cantidad}x {producto} ({guiso})" if guiso != "N/A" else f"{cantidad}x {producto}"
+        
+        # Agregamos a la lista de la memoria
+        st.session_state.carrito.append({"nombre": nombre_item, "precio": costo_item})
+        st.toast(f"Agregado: {nombre_item}")
 
-    if boton_agregar:
-        costo_total = PRECIOS[producto] * cantidad
-        texto_item = f"{cantidad}x {producto} ({guiso})" if guiso != "N/A" else f"{cantidad}x {producto}"
-        # Guardamos en la memoria
-        st.session_state.carrito.append({"nombre": texto_item, "precio": costo_total})
-
-# --- MOSTRAR LA LISTA SUMADA (TICKET) ---
+# --- SECCIÓN 2: MOSTRAR EL CARRITO Y COBRAR ---
 if st.session_state.carrito:
-    st.write("---")
-    st.subheader("📝 Pedido de la Mesa")
+    st.write("### 📝 Cuenta actual de la mesa")
     
-    total_a_cobrar = 0
-    for i, item in enumerate(st.session_state.carrito):
-        st.write(f"**{i+1}.** {item['nombre']} .... **${item['precio']}**")
-        total_a_cobrar += item['precio']
+    # Crear una tablita para que se vea ordenado
+    df_carrito = pd.DataFrame(st.session_state.carrito)
+    st.table(df_carrito)
     
-    st.write(f"## 💰 TOTAL: ${total_a_cobrar}")
+    total_venta = df_carrito['precio'].sum()
+    st.write(f"## TOTAL A COBRAR: ${total_venta}")
 
-    col_1, col_2 = st.columns(2)
-    with col_1:
-        if st.button("🗑️ Cancelar Todo"):
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("🗑️ VACÍAR CARRITO", use_container_width=True):
             st.session_state.carrito = []
             st.rerun()
-    with col_2:
-        if st.button("✅ REGISTRAR COBRO", type="primary"):
-            # Guardar en la base de datos permanente
-            resumen = " / ".join([x['nombre'] for x in st.session_state.carrito])
-            fecha_v = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            
+    with col2:
+        if st.button("💰 COBRAR AHORA", type="primary", use_container_width=True):
+            # Guardamos todo el pedido en el historial (Base de Datos)
+            resumen_final = " / ".join(df_carrito['nombre'].tolist())
+            fecha_hoy = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            
             c.execute("INSERT INTO ventas (detalle, total, fecha) VALUES (?, ?, ?)", 
-                      (resumen, total_a_cobrar, fecha_v))
+                      (resumen_final, total_venta, fecha_hoy))
             conn.commit()
             
-            # Limpiar carrito
+            # Limpiamos el carrito para el siguiente cliente
             st.session_state.carrito = []
-            st.success("Venta guardada con éxito")
+            st.success("¡Venta guardada con éxito!")
             st.balloons()
             st.rerun()
 
-# --- RESUMEN DE CAJA ---
+# --- SECCIÓN 3: HISTORIAL DEL DÍA ---
 st.divider()
-df = pd.read_sql_query("SELECT * FROM ventas", conn)
-if not df.empty:
-    df['fecha'] = pd.to_datetime(df['fecha'])
+st.subheader("📊 Resumen de la noche")
+df_historial = pd.read_sql_query("SELECT * FROM ventas", conn)
+
+if not df_historial.empty:
+    df_historial['fecha'] = pd.to_datetime(df_historial['fecha'])
     hoy = datetime.now().date()
-    total_hoy = df[df['fecha'].dt.date == hoy]['total'].sum()
-    st.metric("💵 Dinero en Caja hoy", f"${total_hoy}")
+    ventas_hoy = df_historial[df_historial['fecha'].dt.date == hoy]
+    
+    st.metric("Total en Caja", f"${ventas_hoy['total'].sum()}")
+    if st.checkbox("Ver historial detallado"):
+        st.dataframe(ventas_hoy.sort_values(by='fecha', ascending=False))
