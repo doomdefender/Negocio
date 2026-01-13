@@ -2,7 +2,6 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime
 from streamlit_gsheets import GSheetsConnection
-import qrcode # Necesario para generar QR
 from io import BytesIO
 from fpdf import FPDF
 
@@ -22,6 +21,7 @@ def obtener_siguiente_folio():
         st.cache_data.clear()
         df = conn.read(worksheet="Hoja1", ttl=0).dropna(how='all')
         if df.empty: return 1
+        # Busca la columna 'Pedido' o usa la última disponible
         col = 'Pedido' if 'Pedido' in df.columns else df.columns[-1]
         ultimo = pd.to_numeric(df[col], errors='coerce').max()
         return int(ultimo) + 1 if not pd.isna(ultimo) else len(df) + 1
@@ -30,8 +30,6 @@ def obtener_siguiente_folio():
 # Estados de la sesión
 if 'carrito' not in st.session_state: st.session_state.carrito = []
 if 'ultimo_ticket' not in st.session_state: st.session_state.ultimo_ticket = None
-# Estado para controlar la visibilidad del QR
-if 'mostrar_qr' not in st.session_state: st.session_state.mostrar_qr = False
 
 folio_actual = obtener_siguiente_folio()
 
@@ -49,6 +47,7 @@ def generar_pdf(tkt):
     pdf.ln(5)
     
     for item in tkt['items']:
+        # Limpieza de texto para evitar errores en el PDF
         desc = item['Descripción'].encode('latin-1', 'replace').decode('latin-1')
         pdf.cell(0, 10, f"- {desc}: ${item['Precio']}", ln=True)
         
@@ -65,6 +64,7 @@ with st.container(border=True):
     st.write("### 🛒 Agregar Producto")
     producto = st.selectbox("Elija el Producto:", list(PRECIOS.keys()))
     
+    # Guisos aparecen debajo del producto
     guisos = []
     if producto in ["Huarache", "Quesadilla", "Sope"]:
         guisos = st.multiselect("Seleccione Guisos:", options=GUISOS_LISTA, max_selections=2)
@@ -97,45 +97,30 @@ if st.session_state.carrito:
                 "Total": total_v, 
                 "Pedido": folio_actual
             }])
+            # Guardar en Google Sheets
             conn.update(worksheet="Hoja1", data=pd.concat([df_h, nueva_f], ignore_index=True))
             
+            # Guardar datos para el ticket y resetear carrito
             st.session_state.ultimo_ticket = {"items": st.session_state.carrito.copy(), "total": total_v, "folio": folio_actual}
             st.session_state.carrito = []
-            st.session_state.mostrar_qr = False # Resetear QR al finalizar
             st.rerun()
         except Exception as e: st.error(f"Error al guardar: {e}")
 
-# 6. Opciones de Ticket (WhatsApp, PDF y QR Opcional)
+# 6. Opciones de Ticket (WhatsApp y PDF)
 if st.session_state.ultimo_ticket:
     t = st.session_state.ultimo_ticket
     st.divider()
     st.success(f"✅ Pedido #{t['folio']} guardado con éxito.")
     
+    # Opción 1: WhatsApp
     msg_wa = f"*La Macura - Pedido #{t['folio']}*%0A" + "%0A".join([f"• {i['Descripción']}" for i in t['items']]) + f"%0A*TOTAL: ${t['total']}*"
     st.link_button("📲 Enviar por WhatsApp", f"https://wa.me/?text={msg_wa}", use_container_width=True)
 
+    # Opción 2: PDF
     pdf_bytes = generar_pdf(t)
     st.download_button(label="📄 Descargar Ticket PDF", data=pdf_bytes, file_name=f"Ticket_Macura_{t['folio']}.pdf", mime="application/pdf", use_container_width=True)
 
-    # Botón para mostrar/ocultar QR
-    if st.button("✨ Generar/Ocultar QR", use_container_width=True):
-        st.session_state.mostrar_qr = not st.session_state.mostrar_qr
-        st.rerun()
-
-    # Si mostrar_qr es True, entonces genera y muestra el QR
-    if st.session_state.mostrar_qr:
-        qr_img = qrcode.make(msg_wa.replace("%0A", "\n"))
-        buf = BytesIO()
-        qr_img.save(buf, format="PNG")
-        
-        # Centramos el QR de forma simple sin columnas complicadas
-        col1, col2, col3 = st.columns([1,2,1])
-        with col2:
-            st.image(buf.getvalue(), caption="Escanea para ver el Ticket", width=180)
-
-
-    st.write("") # Espacio para el botón de siguiente
-    if st.button("Siguiente Cliente ➡️", use_container_width=True):
+    st.write("") # Espacio
+    if st.button("Siguiente Cliente ✨", use_container_width=True):
         st.session_state.ultimo_ticket = None
-        st.session_state.mostrar_qr = False # Asegurar que el QR se oculte para el siguiente cliente
         st.rerun()
