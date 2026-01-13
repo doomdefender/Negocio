@@ -7,7 +7,7 @@ from io import BytesIO
 from fpdf import FPDF
 
 # 1. Configuración de página
-st.set_page_config(page_title="Cena Mamá", page_icon="🍳")
+st.set_page_config(page_title="La Macura", page_icon="🌮")
 
 # 2. Conexión con Google Sheets
 conn = st.connection("gsheets", type=GSheetsConnection)
@@ -24,7 +24,7 @@ if 'carrito' not in st.session_state:
 if 'ultimo_ticket' not in st.session_state:
     st.session_state.ultimo_ticket = None
 
-st.title("🍳 El Sazón de Mamá")
+st.title("🌮 La Macura")
 
 # --- SECCIÓN DE SELECCIÓN ---
 with st.container(border=True):
@@ -70,7 +70,6 @@ if st.session_state.carrito:
     with col2:
         if st.button("💰 FINALIZAR Y GUARDAR", type="primary", use_container_width=True):
             try:
-                # Leer historial (ttl=0 para datos frescos)
                 try:
                     df_existente = conn.read(worksheet="Hoja1", ttl=0)
                 except:
@@ -83,7 +82,6 @@ if st.session_state.carrito:
                     "Total": total_venta
                 }])
 
-                # Acumular filas
                 df_final = pd.concat([df_existente, nueva_venta], ignore_index=True).dropna(how='all')
                 conn.update(worksheet="Hoja1", data=df_final)
                 
@@ -94,16 +92,16 @@ if st.session_state.carrito:
             except Exception as e:
                 st.error(f"Error: {e}")
 
-# --- SECCIÓN DE TICKET (PDF, WHATSAPP Y QR) ---
+# --- SECCIÓN DE TICKET (LA MACURA) ---
 if st.session_state.ultimo_ticket:
     st.divider()
     st.success("✅ Venta registrada")
     
-    # PDF
+    # Generar PDF con nuevo nombre
     pdf = FPDF()
     pdf.add_page()
     pdf.set_font("Helvetica", "B", 16)
-    pdf.cell(0, 10, "EL SAZON DE MAMA", ln=True, align="C")
+    pdf.cell(0, 10, "LA MACURA", ln=True, align="C")
     pdf.set_font("Helvetica", "", 12)
     pdf.cell(0, 10, f"Fecha: {datetime.now().strftime('%d/%m/%Y %H:%M')}", ln=True, align="C")
     pdf.ln(5)
@@ -114,17 +112,17 @@ if st.session_state.ultimo_ticket:
     pdf.cell(0, 10, f"TOTAL: ${st.session_state.total_final}", ln=True)
     
     pdf_buffer = BytesIO(pdf.output())
-    st.download_button("📥 Ticket PDF", data=pdf_buffer, file_name="ticket.pdf", mime="application/pdf", use_container_width=True)
+    st.download_button("📥 Ticket PDF", data=pdf_buffer, file_name="ticket_macura.pdf", mime="application/pdf", use_container_width=True)
 
-    # WhatsApp
-    resumen_wa = f"*Cena Mamá*%0A" + "%0A".join([f"• {i['Descripción']}" for i in st.session_state.ultimo_ticket]) + f"%0A*Total: ${st.session_state.total_final}*"
+    # WhatsApp con nuevo nombre
+    resumen_wa = f"*La Macura*%0A" + "%0A".join([f"• {i['Descripción']}" for i in st.session_state.ultimo_ticket]) + f"%0A*Total: ${st.session_state.total_final}*"
     st.link_button("📲 WhatsApp", f"https://wa.me/?text={resumen_wa}", use_container_width=True)
 
-    # --- QR DE VUELTA ---
+    # QR
     qr_img = qrcode.make(resumen_wa.replace("%0A", "\n"))
     qr_buf = BytesIO()
     qr_img.save(qr_buf)
-    st.image(qr_buf.getvalue(), width=200, caption="Escanea para ver el ticket")
+    st.image(qr_buf.getvalue(), width=200, caption="Ticket de La Macura")
 
     if st.button("Siguiente Cliente ✨"):
         st.session_state.ultimo_ticket = None
