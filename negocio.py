@@ -24,17 +24,29 @@ if 'carrito' not in st.session_state:
     st.session_state.carrito = []
 if 'ultimo_ticket' not in st.session_state:
     st.session_state.ultimo_ticket = None
-if 'conteo_clientes' not in st.session_state:
-    # Intentamos ver cuántas ventas hay hoy en el Excel para seguir el hilo, 
-    # si no, empezamos en 1.
-    st.session_state.conteo_clientes = 1
+
+# --- FUNCIÓN MAESTRA DE CONTEO (CONECTADA AL EXCEL) ---
+def obtener_numero_pedido_real():
+    try:
+        # Lee el excel sin caché para ver el dato más nuevo
+        df_lectura = conn.read(worksheet="Hoja1", ttl=0)
+        if df_lectura.empty:
+            return 1
+        # Busca el número más alto en la columna 'Venta_No' y le suma 1
+        return int(df_lectura['Venta_No'].max()) + 1
+    except:
+        return 1
+
+# El número se calcula al cargar la app o después de "Siguiente Cliente"
+if 'num_pedido_actual' not in st.session_state:
+    st.session_state.num_pedido_actual = obtener_numero_pedido_real()
 
 st.title("🌮 La Macura")
-st.subheader(f"👤 Cliente / Pedido actual: #{st.session_state.conteo_clientes}")
+st.subheader(f"🔢 Pedido Actual: #{st.session_state.num_pedido_actual}")
 
 # --- SECCIÓN DE SELECCIÓN ---
 with st.container(border=True):
-    st.subheader(f"🛒 Nueva Venta")
+    st.subheader("🛒 Nueva Venta")
     producto = st.selectbox("1. Elige el Producto:", list(PRECIOS.keys()), key="prod_principal")
 
     guisos_sel = []
@@ -76,7 +88,7 @@ if st.session_state.carrito:
 
             resumen_productos = " + ".join(df_c["Descripción"].tolist())
             nueva_venta = pd.DataFrame([{
-                "Venta_No": st.session_state.conteo_clientes,
+                "Venta_No": st.session_state.num_pedido_actual,
                 "Fecha": datetime.now().strftime("%d/%m/%Y %H:%M:%S"),
                 "Productos": resumen_productos,
                 "Total": total_venta
@@ -85,18 +97,19 @@ if st.session_state.carrito:
             df_final = pd.concat([df_existente, nueva_venta], ignore_index=True).dropna(how='all')
             conn.update(worksheet="Hoja1", data=df_final)
             
+            # Guardar datos para el ticket antes de borrar carrito
             st.session_state.ultimo_ticket = st.session_state.carrito.copy()
             st.session_state.total_final = total_venta
-            st.session_state.num_pedido_final = st.session_state.conteo_clientes
+            st.session_state.folio_final = st.session_state.num_pedido_actual
             st.session_state.carrito = []
             st.rerun()
         except Exception as e:
-            st.error(f"Error: {e}")
+            st.error(f"Error al conectar con Excel: {e}")
 
 # --- SECCIÓN DE TICKET ---
 if st.session_state.ultimo_ticket:
     st.divider()
-    st.success(f"✅ Venta #{st.session_state.num_pedido_final} Guardada")
+    st.success(f"✅ Venta #{st.session_state.folio_final} Guardada en Excel")
     
     # PDF
     pdf = FPDF()
@@ -104,7 +117,7 @@ if st.session_state.ultimo_ticket:
     pdf.set_font("Helvetica", "B", 16)
     pdf.cell(0, 10, "LA MACURA", ln=True, align="C")
     pdf.set_font("Helvetica", "B", 12)
-    pdf.cell(0, 10, f"ORDEN DE SERVICIO #{st.session_state.num_pedido_final}", ln=True, align="C")
+    pdf.cell(0, 10, f"PEDIDO #{st.session_state.folio_final}", ln=True, align="C")
     pdf.ln(5)
     for item in st.session_state.ultimo_ticket:
         pdf.cell(0, 10, f"{item['Descripción']} - ${item['Precio']}", ln=True)
@@ -112,13 +125,13 @@ if st.session_state.ultimo_ticket:
     pdf.cell(0, 10, f"TOTAL: ${st.session_state.total_final}", ln=True)
     
     pdf_buffer = BytesIO(pdf.output())
-    st.download_button("📥 Ticket PDF", data=pdf_buffer, file_name=f"pedido_{st.session_state.num_pedido_final}.pdf", mime="application/pdf", use_container_width=True)
+    st.download_button("📥 Ticket PDF", data=pdf_buffer, file_name=f"pedido_{st.session_state.folio_final}.pdf", mime="application/pdf", use_container_width=True)
 
     # WhatsApp
-    resumen_wa = f"*La Macura - Pedido #{st.session_state.num_pedido_final}*%0A" + "%0A".join([f"• {i['Descripción']}" for i in st.session_state.ultimo_ticket]) + f"%0A*Total: ${st.session_state.total_final}*"
-    st.link_button("📲 Enviar por WhatsApp", f"https://wa.me/?text={resumen_wa}", use_container_width=True)
+    resumen_wa = f"*La Macura - Pedido #{st.session_state.folio_final}*%0A" + "%0A".join([f"• {i['Descripción']}" for i in st.session_state.ultimo_ticket]) + f"%0A*Total: ${st.session_state.total_final}*"
+    st.link_button("📲 WhatsApp", f"https://wa.me/?text={resumen_wa}", use_container_width=True)
 
-    # QR Pequeño
+    # QR Centrado
     qr_img = qrcode.make(resumen_wa.replace("%0A", "\n"))
     qr_buf = BytesIO()
     qr_img.save(qr_buf)
@@ -127,7 +140,7 @@ if st.session_state.ultimo_ticket:
         st.image(qr_buf.getvalue(), use_container_width=True)
 
     if st.button("Siguiente Cliente ✨"):
-        # AQUÍ ES DONDE SUMAMOS AL CONTADOR
-        st.session_state.conteo_clientes += 1
+        # Al dar click, recalculamos el folio mirando el Excel de nuevo
+        st.session_state.num_pedido_actual = obtener_numero_pedido_real()
         st.session_state.ultimo_ticket = None
         st.rerun()
