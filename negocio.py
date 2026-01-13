@@ -19,30 +19,28 @@ PRECIOS = {
 }
 GUISOS_LISTA = ["Pollo Deshebrado", "Chorizo", "Salchicha", "Tinga", "Bistec", "Rajas", "Champiñones"]
 
-# --- INICIALIZAR ESTADOS ---
+# --- FUNCIÓN PARA CONTAR FILAS REALES EN EL EXCEL ---
+def obtener_siguiente_folio():
+    try:
+        # Leemos la hoja completa
+        df_temp = conn.read(worksheet="Hoja1", ttl=0)
+        # Filtramos filas que no estén totalmente vacías
+        df_temp = df_temp.dropna(how='all')
+        # El siguiente es el número de filas + 1
+        return len(df_temp) + 1
+    except:
+        return 1
+
+# Inicializar estados de sesión
 if 'carrito' not in st.session_state:
     st.session_state.carrito = []
 if 'ultimo_ticket' not in st.session_state:
     st.session_state.ultimo_ticket = None
-
-# --- FUNCIÓN MAESTRA DE CONTEO (CONECTADA AL EXCEL) ---
-def obtener_numero_pedido_real():
-    try:
-        # Lee el excel sin caché para ver el dato más nuevo
-        df_lectura = conn.read(worksheet="Hoja1", ttl=0)
-        if df_lectura.empty:
-            return 1
-        # Busca el número más alto en la columna 'Venta_No' y le suma 1
-        return int(df_lectura['Venta_No'].max()) + 1
-    except:
-        return 1
-
-# El número se calcula al cargar la app o después de "Siguiente Cliente"
-if 'num_pedido_actual' not in st.session_state:
-    st.session_state.num_pedido_actual = obtener_numero_pedido_real()
+if 'folio_actual' not in st.session_state:
+    st.session_state.folio_actual = obtener_siguiente_folio()
 
 st.title("🌮 La Macura")
-st.subheader(f"🔢 Pedido Actual: #{st.session_state.num_pedido_actual}")
+st.info(f"📋 Próximo Pedido a registrar: **#{st.session_state.folio_actual}**")
 
 # --- SECCIÓN DE SELECCIÓN ---
 with st.container(border=True):
@@ -81,35 +79,37 @@ if st.session_state.carrito:
 
     if st.button("💰 FINALIZAR Y GUARDAR", type="primary", use_container_width=True):
         try:
+            # Leer historial para no perder datos
             try:
-                df_existente = conn.read(worksheet="Hoja1", ttl=0)
+                df_existente = conn.read(worksheet="Hoja1", ttl=0).dropna(how='all')
             except:
-                df_existente = pd.DataFrame(columns=["Venta_No", "Fecha", "Productos", "Total"])
+                df_existente = pd.DataFrame()
 
             resumen_productos = " + ".join(df_c["Descripción"].tolist())
             nueva_venta = pd.DataFrame([{
-                "Venta_No": st.session_state.num_pedido_actual,
+                "Pedido": st.session_state.folio_actual,
                 "Fecha": datetime.now().strftime("%d/%m/%Y %H:%M:%S"),
                 "Productos": resumen_productos,
                 "Total": total_venta
             }])
 
-            df_final = pd.concat([df_existente, nueva_venta], ignore_index=True).dropna(how='all')
+            # Unir y subir
+            df_final = pd.concat([df_existente, nueva_venta], ignore_index=True)
             conn.update(worksheet="Hoja1", data=df_final)
             
-            # Guardar datos para el ticket antes de borrar carrito
+            # Preparar ticket
             st.session_state.ultimo_ticket = st.session_state.carrito.copy()
             st.session_state.total_final = total_venta
-            st.session_state.folio_final = st.session_state.num_pedido_actual
+            st.session_state.folio_final = st.session_state.folio_actual
             st.session_state.carrito = []
             st.rerun()
         except Exception as e:
-            st.error(f"Error al conectar con Excel: {e}")
+            st.error(f"Error al guardar: {e}")
 
 # --- SECCIÓN DE TICKET ---
 if st.session_state.ultimo_ticket:
     st.divider()
-    st.success(f"✅ Venta #{st.session_state.folio_final} Guardada en Excel")
+    st.success(f"✅ Venta #{st.session_state.folio_final} exitosa")
     
     # PDF
     pdf = FPDF()
@@ -117,7 +117,7 @@ if st.session_state.ultimo_ticket:
     pdf.set_font("Helvetica", "B", 16)
     pdf.cell(0, 10, "LA MACURA", ln=True, align="C")
     pdf.set_font("Helvetica", "B", 12)
-    pdf.cell(0, 10, f"PEDIDO #{st.session_state.folio_final}", ln=True, align="C")
+    pdf.cell(0, 10, f"ORDEN #{st.session_state.folio_final}", ln=True, align="C")
     pdf.ln(5)
     for item in st.session_state.ultimo_ticket:
         pdf.cell(0, 10, f"{item['Descripción']} - ${item['Precio']}", ln=True)
@@ -125,13 +125,12 @@ if st.session_state.ultimo_ticket:
     pdf.cell(0, 10, f"TOTAL: ${st.session_state.total_final}", ln=True)
     
     pdf_buffer = BytesIO(pdf.output())
-    st.download_button("📥 Ticket PDF", data=pdf_buffer, file_name=f"pedido_{st.session_state.folio_final}.pdf", mime="application/pdf", use_container_width=True)
+    st.download_button("📥 Descargar PDF", data=pdf_buffer, file_name=f"orden_{st.session_state.folio_final}.pdf", mime="application/pdf", use_container_width=True)
 
-    # WhatsApp
+    # WhatsApp y QR
     resumen_wa = f"*La Macura - Pedido #{st.session_state.folio_final}*%0A" + "%0A".join([f"• {i['Descripción']}" for i in st.session_state.ultimo_ticket]) + f"%0A*Total: ${st.session_state.total_final}*"
-    st.link_button("📲 WhatsApp", f"https://wa.me/?text={resumen_wa}", use_container_width=True)
+    st.link_button("📲 Enviar WhatsApp", f"https://wa.me/?text={resumen_wa}", use_container_width=True)
 
-    # QR Centrado
     qr_img = qrcode.make(resumen_wa.replace("%0A", "\n"))
     qr_buf = BytesIO()
     qr_img.save(qr_buf)
@@ -140,7 +139,7 @@ if st.session_state.ultimo_ticket:
         st.image(qr_buf.getvalue(), use_container_width=True)
 
     if st.button("Siguiente Cliente ✨"):
-        # Al dar click, recalculamos el folio mirando el Excel de nuevo
-        st.session_state.num_pedido_actual = obtener_numero_pedido_real()
+        # Al terminar, volvemos a contar las filas para actualizar el folio
+        st.session_state.folio_actual = obtener_siguiente_folio()
         st.session_state.ultimo_ticket = None
         st.rerun()
