@@ -25,43 +25,50 @@ if 'carrito' not in st.session_state:
 
 st.title("🍳 El Sazón de Mamá")
 
-# --- FORMULARIO ---
-with st.form("pedido_form", clear_on_submit=True):
-    st.subheader("🛒 Nuevo Producto")
-    
-    producto = st.selectbox("Producto:", list(PRECIOS.keys()))
-    
-    guisos_sel = []
-    
-    # TRUCO: La 'key' del multiselect incluye el nombre del producto 
-    # para que se refresque solito cada vez que cambias de opción.
-    if producto in ["Huarache", "Quesadilla", "Sope"]:
-        guisos_sel = st.multiselect(
-            "Selecciona guisos (Máx 2):",
-            options=GUISOS_LISTA,
-            max_selections=2,
-            key=f"guisos_{producto}" 
-        )
-    elif producto == "Gordita de Chicharrón":
-        guisos_sel = ["Chicharrón"]
-        st.info("💡 Guiso: Chicharrón")
-    
-    cantidad = st.number_input("Cantidad:", min_value=1, value=1)
-    
-    if st.form_submit_button("➕ AGREGAR"):
-        if producto in ["Huarache", "Quesadilla", "Sope"] and not guisos_sel:
-            st.error("⚠️ Elige al menos un guiso")
-        else:
-            total = PRECIOS[producto] * cantidad
-            txt_guisos = " de " + " y ".join(guisos_sel) if guisos_sel and producto != "Gordita de Chicharrón" else ""
-            detalle = f"{cantidad}x {producto}{txt_guisos}"
-            
-            st.session_state.carrito.append({"Descripción": detalle, "Precio": total})
-            st.toast(f"Agregado: {producto}")
+# --- ÁREA DE SELECCIÓN (Fuera del form para que sea dinámica) ---
+st.subheader("🛒 Nuevo Producto")
+producto = st.selectbox("1. Elige el Producto:", list(PRECIOS.keys()))
 
-# --- CARRITO ---
+guisos_sel = []
+
+# Aquí está el truco: se muestra u oculta según el producto seleccionado
+if producto in ["Huarache", "Quesadilla", "Sope"]:
+    guisos_sel = st.multiselect(
+        "2. Selecciona guisos (Máx 2):",
+        options=GUISOS_LISTA,
+        max_selections=2,
+        key=f"selector_{producto}" # Llave única por producto
+    )
+elif producto == "Gordita de Chicharrón":
+    guisos_sel = ["Chicharrón"]
+    st.info("💡 Guiso automático: Chicharrón")
+else:
+    st.write("🥤 Sin guisos para esta bebida.")
+
+cantidad = st.number_input("3. Cantidad:", min_value=1, value=1)
+
+# BOTÓN PARA AGREGAR (Ahora es un botón normal, no de formulario)
+if st.button("➕ AGREGAR A LA CUENTA", use_container_width=True):
+    if producto in ["Huarache", "Quesadilla", "Sope"] and not guisos_sel:
+        st.error("⚠️ Por favor selecciona los guisos.")
+    else:
+        total = PRECIOS[producto] * cantidad
+        # Formato de texto
+        if producto == "Gordita de Chicharrón":
+            detalle = f"{cantidad}x {producto}"
+        elif guisos_sel:
+            detalle = f"{cantidad}x {producto} de {' y '.join(guisos_sel)}"
+        else:
+            detalle = f"{cantidad}x {producto}"
+            
+        st.session_state.carrito.append({"Descripción": detalle, "Precio": total})
+        st.success(f"Agregado: {detalle}")
+        st.rerun() # Esto limpia los campos después de agregar
+
+# --- MOSTRAR CARRITO ---
 if st.session_state.carrito:
     st.divider()
+    st.subheader("📝 Cuenta Actual")
     df_c = pd.DataFrame(st.session_state.carrito)
     st.table(df_c)
     
@@ -70,11 +77,11 @@ if st.session_state.carrito:
 
     c1, c2 = st.columns(2)
     with c1:
-        if st.button("🗑️ VACIAR"):
+        if st.button("🗑️ VACIAR CUENTA"):
             st.session_state.carrito = []
             st.rerun()
     with c2:
-        if st.button("💰 GUARDAR VENTA", type="primary"):
+        if st.button("💰 GUARDAR VENTA", type="primary", use_container_width=True):
             try:
                 historial = conn.read(worksheet="Hoja1")
                 resumen = " + ".join(df_c["Descripción"].tolist())
@@ -89,9 +96,9 @@ if st.session_state.carrito:
                 st.balloons()
                 st.rerun()
             except:
-                st.error("Error al conectar con Google")
+                st.error("Error al conectar con Google Sheets")
 
-# --- RESUMEN ---
+# --- RESUMEN DEL DÍA ---
 st.divider()
 try:
     df_h = conn.read(worksheet="Hoja1")
@@ -102,6 +109,6 @@ try:
         
         col_m1, col_m2 = st.columns(2)
         col_m1.metric("Ventas de hoy", len(v_hoy))
-        col_m2.metric("Dinero en Caja", f"${v_hoy['Total'].sum()}")
+        col_m2.metric("Total en Caja", f"${v_hoy['Total'].sum()}")
 except:
     pass
