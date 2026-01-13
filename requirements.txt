@@ -1,5 +1,5 @@
 streamlit
 pandas
 st-gsheets-connection
-qrcode[pil]
 fpdf2
+qrcode[pil]
