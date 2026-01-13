@@ -32,7 +32,7 @@ if 'ultimo_ticket' not in st.session_state: st.session_state.ultimo_ticket = Non
 
 folio_actual = obtener_siguiente_folio()
 
-# 3. Función para Crear PDF
+# 3. Función para Crear PDF (CORREGIDA)
 def generar_pdf(tkt):
     pdf = FPDF()
     pdf.add_page()
@@ -42,14 +42,15 @@ def generar_pdf(tkt):
     pdf.cell(0, 10, f"Pedido: #{tkt['folio']}", ln=True, align="C")
     pdf.cell(0, 10, f"Fecha: {datetime.now().strftime('%d/%m/%Y %H:%M')}", ln=True, align="C")
     pdf.ln(5)
-    pdf.cell(0, 0, "", "T", ln=True)
+    pdf.line(10, pdf.get_y(), 200, pdf.get_y())
     pdf.ln(5)
     for item in tkt['items']:
         pdf.cell(0, 10, f"- {item['Descripción']}: ${item['Precio']}", ln=True)
     pdf.ln(5)
     pdf.set_font("Arial", "B", 14)
     pdf.cell(0, 10, f"TOTAL: ${tkt['total']}", ln=True, align="R")
-    return pdf.output(dest='S').encode('latin-1')
+    # En fpdf2, output() sin argumentos devuelve bytes directamente
+    return pdf.output()
 
 # 4. Interfaz de Usuario
 st.title("🌮 La Macura")
@@ -103,18 +104,21 @@ if st.session_state.ultimo_ticket:
     msg = f"*La Macura - Pedido #{t['folio']}*%0A" + "%0A".join([f"• {i['Descripción']}" for i in t['items']]) + f"%0A*TOTAL: ${t['total']}*"
     st.link_button("📲 Enviar WhatsApp", f"https://wa.me/?text={msg}", use_container_width=True)
 
-    # PDF
-    pdf_bytes = generar_pdf(t)
-    st.download_button(label="📄 Descargar Ticket PDF", data=pdf_bytes, file_name=f"Ticket_LaMacura_{t['folio']}.pdf", mime="application/pdf", use_container_width=True)
+    # Botón PDF con corrección de Bytes
+    try:
+        pdf_output = generar_pdf(t)
+        st.download_button(label="📄 Descargar Ticket PDF", data=pdf_output, file_name=f"Ticket_{t['folio']}.pdf", mime="application/pdf", use_container_width=True)
+    except:
+        st.warning("El PDF no se pudo generar, pero puedes usar WhatsApp o el QR.")
 
     # QR Pequeño
     qr_img = qrcode.make(msg.replace("%0A", "\n"))
     buf = BytesIO()
     qr_img.save(buf)
     
-    col_izq, col_centro, col_der = st.columns([1, 1, 1])
-    with col_centro:
-        st.image(buf.getvalue(), caption="QR Ticket", width=150)
+    col1, col2, col3 = st.columns([1, 1, 1])
+    with col2:
+        st.image(buf.getvalue(), caption="QR Ticket", width=120)
 
     if st.button("Siguiente Cliente ✨", use_container_width=True):
         st.session_state.ultimo_ticket = None
