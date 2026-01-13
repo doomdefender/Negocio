@@ -17,25 +17,26 @@ PRECIOS = {
 }
 GUISOS_LISTA = ["Pollo Deshebrado", "Chorizo", "Salchicha", "Tinga", "Bistec", "Rajas", "Champiñones"]
 
-# --- FUNCIÓN CORREGIDA ---
+# --- FUNCIÓN DEFINITIVA PARA EL FOLIO ---
 def obtener_siguiente_folio():
     try:
-        # ttl=0 para que no use memoria vieja y lea lo que acabas de guardar
+        # Leemos el Excel
         df_temp = conn.read(worksheet="Hoja1", ttl=0)
-        # Limpiamos filas vacías que Google Sheets crea a veces
         df_temp = df_temp.dropna(how='all')
         
-        # Si el Excel está vacío (solo encabezados o nada), empezamos en 1
-        if len(df_temp) == 0:
+        if df_temp.empty:
             return 1
         
-        # SI YA TIENES 7 FILAS DE DATOS, EL SIGUIENTE ES EL 8
-        # Ajustamos aquí: si te sobra 1, simplemente restamos o sumamos según tu estructura
-        return len(df_temp) + 1
-    except:
-        return 1
+        # Buscamos el número más alto en la columna 'Pedido'
+        # Si el máximo es 8, el siguiente será 9
+        ultimo_folio = pd.to_numeric(df_temp['Pedido']).max()
+        return int(ultimo_folio) + 1
+    except Exception as e:
+        # Si la columna 'Pedido' aún no existe o hay error, 
+        # contamos filas como plan de respaldo
+        return len(df_temp) + 1 if 'df_temp' in locals() else 1
 
-# Inicializar estados
+# Inicializar estados de sesión
 if 'carrito' not in st.session_state:
     st.session_state.carrito = []
 if 'ultimo_ticket' not in st.session_state:
@@ -44,7 +45,7 @@ if 'folio_actual' not in st.session_state:
     st.session_state.folio_actual = obtener_siguiente_folio()
 
 st.title("🌮 La Macura")
-st.info(f"📋 Pedido actual: **#{st.session_state.folio_actual}**")
+st.info(f"🔢 Próximo Pedido: **#{st.session_state.folio_actual}**")
 
 # --- SECCIÓN DE SELECCIÓN ---
 with st.container(border=True):
@@ -60,13 +61,10 @@ with st.container(border=True):
     cantidad = st.number_input("Cantidad:", min_value=1, value=1)
 
     if st.button("➕ AGREGAR", use_container_width=True):
-        if producto in ["Huarache", "Quesadilla", "Sope"] and not guisos_sel:
-            st.error("Selecciona guisos.")
-        else:
-            total_item = PRECIOS[producto] * cantidad
-            detalle = f"{cantidad}x {producto}" + (f" de {' y '.join(guisos_sel)}" if guisos_sel and producto != "Gordita de Chicharrón" else "")
-            st.session_state.carrito.append({"Descripción": detalle, "Precio": total_item})
-            st.rerun()
+        total_item = PRECIOS[producto] * cantidad
+        detalle = f"{cantidad}x {producto}" + (f" de {' y '.join(guisos_sel)}" if guisos_sel and producto != "Gordita de Chicharrón" else "")
+        st.session_state.carrito.append({"Descripción": detalle, "Precio": total_item})
+        st.rerun()
 
 # --- GUARDADO ---
 if st.session_state.carrito:
@@ -75,7 +73,7 @@ if st.session_state.carrito:
     st.table(df_c)
     total_v = df_c["Precio"].sum()
     
-    if st.button("💰 GUARDAR VENTA", type="primary", use_container_width=True):
+    if st.button("💰 FINALIZAR VENTA", type="primary", use_container_width=True):
         try:
             df_existente = conn.read(worksheet="Hoja1", ttl=0).dropna(how='all')
             resumen = " + ".join(df_c["Descripción"].tolist())
@@ -101,13 +99,13 @@ if st.session_state.carrito:
 # --- TICKET ---
 if st.session_state.ultimo_ticket:
     st.divider()
+    st.success(f"✅ Pedido #{st.session_state.folio_final} registrado")
     
-    # PDF y WhatsApp (Nombre: La Macura)
     resumen_wa = f"*La Macura - Pedido #{st.session_state.folio_final}*%0A" + "%0A".join([f"• {i['Descripción']}" for i in st.session_state.ultimo_ticket]) + f"%0A*Total: ${st.session_state.total_final}*"
     
     st.link_button("📲 Enviar WhatsApp", f"https://wa.me/?text={resumen_wa}", use_container_width=True)
 
-    # QR Pequeño y centrado
+    # QR Centrado
     qr_img = qrcode.make(resumen_wa.replace("%0A", "\n"))
     qr_buf = BytesIO()
     qr_img.save(qr_buf)
