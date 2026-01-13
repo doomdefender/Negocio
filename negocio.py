@@ -120,15 +120,21 @@ if 'ultimo_ticket' in st.session_state:
     pdf.set_font("Arial", "", 12)
     pdf.cell(0, 10, f"Fecha: {datetime.now().strftime('%d/%m/%Y %H:%M')}", ln=True, align="C")
     pdf.ln(5)
+    
     for item in st.session_state.ultimo_ticket:
         pdf.cell(0, 10, f"{item['Descripción']} - ${item['Precio']}", ln=True)
+    
     pdf.ln(5)
     pdf.set_font("Arial", "B", 14)
     pdf.cell(0, 10, f"TOTAL: ${st.session_state.total_final}", ln=True)
+
+    # AQUÍ ESTÁ EL CAMBIO IMPORTANTE:
+    # Convertimos el PDF a bytes para que Streamlit pueda leerlo
+    pdf_bytes = pdf.output() 
     
     st.download_button(
         label="📥 Descargar Ticket (PDF)",
-        data=pdf.output(),
+        data=bytes(pdf_bytes), # Convertimos a bytes aquí
         file_name=f"ticket_{datetime.now().strftime('%H%M%S')}.pdf",
         mime="application/pdf",
         use_container_width=True
