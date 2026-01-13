@@ -12,7 +12,7 @@ st.set_page_config(page_title="La Macura", page_icon="🌮")
 # 2. Conexión con Google Sheets
 conn = st.connection("gsheets", type=GSheetsConnection)
 
-# 3. Datos Actualizados
+# 3. Datos
 PRECIOS = {
     "Huarache": 30.0, "Quesadilla": 30.0, "Sope": 30.0,
     "Gordita de Chicharrón": 30.0, "Refresco": 20.0, "Café": 10.0
@@ -92,18 +92,16 @@ if st.session_state.carrito:
             except Exception as e:
                 st.error(f"Error: {e}")
 
-# --- SECCIÓN DE TICKET (LA MACURA) ---
+# --- SECCIÓN DE TICKET ---
 if st.session_state.ultimo_ticket:
     st.divider()
     st.success("✅ Venta registrada")
     
-    # Generar PDF con nuevo nombre
+    # Generar PDF
     pdf = FPDF()
     pdf.add_page()
     pdf.set_font("Helvetica", "B", 16)
     pdf.cell(0, 10, "LA MACURA", ln=True, align="C")
-    pdf.set_font("Helvetica", "", 12)
-    pdf.cell(0, 10, f"Fecha: {datetime.now().strftime('%d/%m/%Y %H:%M')}", ln=True, align="C")
     pdf.ln(5)
     for item in st.session_state.ultimo_ticket:
         pdf.cell(0, 10, f"{item['Descripción']} - ${item['Precio']}", ln=True)
@@ -114,15 +112,18 @@ if st.session_state.ultimo_ticket:
     pdf_buffer = BytesIO(pdf.output())
     st.download_button("📥 Ticket PDF", data=pdf_buffer, file_name="ticket_macura.pdf", mime="application/pdf", use_container_width=True)
 
-    # WhatsApp con nuevo nombre
     resumen_wa = f"*La Macura*%0A" + "%0A".join([f"• {i['Descripción']}" for i in st.session_state.ultimo_ticket]) + f"%0A*Total: ${st.session_state.total_final}*"
     st.link_button("📲 WhatsApp", f"https://wa.me/?text={resumen_wa}", use_container_width=True)
 
-    # QR
+    # --- QR CENTRADO ---
     qr_img = qrcode.make(resumen_wa.replace("%0A", "\n"))
     qr_buf = BytesIO()
     qr_img.save(qr_buf)
-    st.image(qr_buf.getvalue(), width=200, caption="Ticket de La Macura")
+    
+    # Creamos 3 columnas, la del medio es para el QR
+    col_a, col_b, col_c = st.columns([1, 2, 1])
+    with col_b:
+        st.image(qr_buf.getvalue(), caption="Ticket de La Macura", use_container_width=True)
 
     if st.button("Siguiente Cliente ✨"):
         st.session_state.ultimo_ticket = None
