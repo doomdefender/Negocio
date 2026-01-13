@@ -1,107 +1,81 @@
 import streamlit as st
 import pandas as pd
 from datetime import datetime
-from streamlit_gsheets import GSheetsConnection
 
-# Configuración de página
-st.set_page_config(page_title="Cena Mamá - Punto de Venta", page_icon="🍳")
+# Configuración básica
+st.set_page_config(page_title="Cena Mamá", page_icon="🍳")
 
-# Conexión con Google Sheets (Configuraremos el link en los Secrets de Streamlit)
-conn = st.connection("gsheets", type=GSheetsConnection)
+# --- MEMORIA DEL CARRITO ---
+if 'carrito' not in st.session_state:
+    st.session_state.carrito = []
+if 'historial_seguro' not in st.session_state:
+    st.session_state.historial_seguro = []
 
-# --- LISTA DE PRECIOS Y GUISOS ---
+# --- PRECIOS ---
 PRECIOS = {
     "Huarache Sencillo": 30.0,
-    "Huarache Combinado": 45.0, # Ejemplo: si es combinado sube un poco
+    "Huarache Combinado": 45.0,
     "Quesadilla": 30.0,
     "Sope": 30.0,
     "Refresco": 20.0,
     "Café": 10.0
 }
-
 GUISOS = ["Chorizo", "Salchicha", "Tinga", "Bistec", "Rajas", "Champiñones"]
 
-# --- MEMORIA DEL CARRITO ---
-if 'carrito' not in st.session_state:
-    st.session_state.carrito = []
-
 st.title("🍳 El Sazón de Mamá")
-st.subheader("Sistema de Cobro Profesional")
 
-# --- SECCIÓN DE SELECCIÓN ---
+# --- AREA DE PEDIDO ---
 with st.container(border=True):
-    producto = st.selectbox("1. Elige el antojito o bebida:", list(PRECIOS.keys()))
+    producto = st.selectbox("¿Qué pidió el cliente?", list(PRECIOS.keys()))
     
-    guisos_seleccionados = []
-    if "Huarache" in producto or producto in ["Quesadilla", "Sope"]:
-        # Aquí permitimos elegir varios guisos (tipo carrito)
-        guisos_seleccionados = st.multiselect("2. Selecciona Guiso(s):", GUISOS)
+    # Guisos (Solo si no es bebida)
+    guisos_sel = []
+    if producto not in ["Refresco", "Café"]:
+        guisos_sel = st.multiselect("Selecciona Guiso(s):", GUISOS)
     
-    cantidad = st.number_input("3. ¿Cuántos son?", min_value=1, value=1, step=1)
+    cantidad = st.number_input("¿Cuántos?", min_value=1, value=1, step=1)
     
-    if st.button("➕ AGREGAR A LA ORDEN", use_container_width=True):
-        costo_unitario = PRECIOS[producto]
-        # Si es combinado (más de un guiso), podrías ajustar el precio aquí si quieres
-        total_item = costo_unitario * cantidad
+    if st.button("➕ AGREGAR A LA CUENTA", use_container_width=True):
+        costo = PRECIOS[producto] * cantidad
+        txt_guisos = ", ".join(guisos_sel) if guisos_sel else "Sencillo"
+        detalle = f"{cantidad}x {producto} ({txt_guisos})"
         
-        guisos_str = ", ".join(guisos_seleccionados) if guisos_seleccionados else "Sencillo"
-        detalle = f"{cantidad}x {producto} ({guisos_str})"
-        
-        st.session_state.carrito.append({
-            "Fecha": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "Productos": detalle,
-            "Total": total_item
-        })
-        st.toast(f"Agregado: {producto}")
+        st.session_state.carrito.append({"Detalle": detalle, "Precio": costo})
+        st.toast("Agregado")
 
-# --- CARRITO DE COMPRAS (LA SUMA) ---
+# --- CARRITO Y TOTAL ---
 if st.session_state.carrito:
     st.divider()
-    st.write("### 📝 Orden Actual")
+    st.subheader("📝 Cuenta Actual")
+    df_c = pd.DataFrame(st.session_state.carrito)
+    st.table(df_c)
     
-    df_carrito = pd.DataFrame(st.session_state.carrito)
-    st.table(df_carrito[["Productos", "Total"]])
-    
-    suma_total = df_carrito["Total"].sum()
-    st.write(f"## TOTAL A COBRAR: ${suma_total}")
+    total = df_c["Precio"].sum()
+    st.write(f"## TOTAL: ${total}")
 
     col1, col2 = st.columns(2)
     with col1:
-        if st.button("🗑️ CANCELAR", use_container_width=True):
+        if st.button("🗑️ CANCELAR"):
             st.session_state.carrito = []
             st.rerun()
-            
     with col2:
-        if st.button("💰 COBRAR Y GUARDAR", type="primary", use_container_width=True):
-            try:
-                # 1. Leer datos actuales de Google Sheets
-                data_existente = conn.read(worksheet="Hoja1")
-                
-                # 2. Preparar la nueva fila (Resumimos la orden en una sola fila)
-                resumen_productos = " + ".join(df_carrito["Productos"].tolist())
-                nueva_venta = pd.DataFrame([{
-                    "Fecha": datetime.now().strftime("%d/%m/%Y %H:%M"),
-                    "Productos": resumen_productos,
-                    "Total": suma_total
-                }])
-                
-                # 3. Concatenar y actualizar Google Sheets
-                actualizado = pd.concat([data_existente, nueva_venta], ignore_index=True)
-                conn.update(worksheet="Hoja1", data=actualizado)
-                
-                st.session_state.carrito = []
-                st.success("✅ Venta guardada en Google Sheets")
-                st.balloons()
-                st.rerun()
-            except Exception as e:
-                st.error(f"Error al conectar con Google Sheets: {e}")
-                st.info("Asegúrate de configurar el link en los Secrets de Streamlit.")
+        if st.button("💰 COBRAR", type="primary"):
+            # Guardamos en un historial local por seguridad
+            resumen = " + ".join(df_c["Detalle"].tolist())
+            st.session_state.historial_seguro.append({
+                "Fecha": datetime.now().strftime("%H:%M"),
+                "Venta": resumen,
+                "Total": total
+            })
+            st.session_state.carrito = []
+            st.success("¡Venta cobrada!")
+            st.balloons()
+            st.rerun()
 
-# --- REPORTE RÁPIDO ---
-st.divider()
-if st.checkbox("Ver reporte de hoy (desde Google Sheets)"):
-    try:
-        df_reporte = conn.read(worksheet="Hoja1")
-        st.dataframe(df_reporte.sort_index(ascending=False), use_container_width=True)
-    except:
-        st.write("Aún no hay datos en el reporte.")
+# --- HISTORIAL DEL DÍA ---
+if st.session_state.historial_dia_seguro:
+    st.divider()
+    st.subheader("📊 Ventas de Hoy")
+    df_h = pd.DataFrame(st.session_state.historial_seguro)
+    st.metric("Total en Caja", f"${df_h['Total'].sum()}")
+    st.dataframe(df_h)
