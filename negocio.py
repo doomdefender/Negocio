@@ -6,7 +6,7 @@ import qrcode
 from io import BytesIO
 from fpdf import FPDF
 
-# 1. Configuración de pantalla
+# 1. Configuración
 st.set_page_config(page_title="La Macura", page_icon="🌮")
 conn = st.connection("gsheets", type=GSheetsConnection)
 
@@ -16,7 +16,6 @@ PRECIOS = {
 }
 GUISOS_LISTA = ["Pollo Deshebrado", "Chorizo", "Salchicha", "Tinga", "Bistec", "Rajas", "Champiñones"]
 
-# 2. Lógica de Pedido Actual
 def obtener_siguiente_folio():
     try:
         st.cache_data.clear()
@@ -32,7 +31,6 @@ if 'ultimo_ticket' not in st.session_state: st.session_state.ultimo_ticket = Non
 
 folio_actual = obtener_siguiente_folio()
 
-# 3. Función de PDF (Corrección de bytes)
 def generar_pdf(tkt):
     pdf = FPDF()
     pdf.add_page()
@@ -49,7 +47,7 @@ def generar_pdf(tkt):
     pdf.cell(0, 10, f"TOTAL: ${tkt['total']}", ln=True, align="R")
     return bytes(pdf.output())
 
-# 4. Interfaz Principal
+# --- INTERFAZ ---
 st.title("🌮 La Macura")
 st.subheader(f"Orden actual: #{folio_actual}")
 
@@ -71,27 +69,23 @@ with st.container(border=True):
         st.session_state.carrito.append({"Descripción": detalle, "Precio": PRECIOS[producto] * cantidad})
         st.rerun()
 
-# 5. Registro de Venta
 if st.session_state.carrito:
     st.divider()
-    df_c = pd.DataFrame(st.session_state.carrito)
-    st.table(df_c)
-    total_v = df_c["Precio"].sum()
+    st.table(pd.DataFrame(st.session_state.carrito))
+    total_v = sum(i['Precio'] for i in st.session_state.carrito)
     st.write(f"## TOTAL: ${total_v}")
     
     if st.button(f"💰 FINALIZAR REGISTRO #{folio_actual}", type="primary", use_container_width=True):
         try:
             df_h = conn.read(worksheet="Hoja1", ttl=0).dropna(how='all')
-            resumen = " / ".join(df_c["Descripción"].tolist())
+            resumen = " / ".join([i['Descripción'] for i in st.session_state.carrito])
             nueva_f = pd.DataFrame([{"Fecha": datetime.now().strftime("%d/%m/%Y %H:%M:%S"), "Productos": resumen, "Total": total_v, "Pedido": folio_actual}])
             conn.update(worksheet="Hoja1", data=pd.concat([df_h, nueva_f], ignore_index=True))
-            
             st.session_state.ultimo_ticket = {"items": st.session_state.carrito.copy(), "total": total_v, "folio": folio_actual}
             st.session_state.carrito = []
             st.rerun()
         except Exception as e: st.error(f"Error: {e}")
 
-# 6. Ticket Final (QR Centrado a la fuerza y PDF)
 if st.session_state.ultimo_ticket:
     t = st.session_state.ultimo_ticket
     st.divider()
@@ -103,27 +97,16 @@ if st.session_state.ultimo_ticket:
     pdf_bytes = generar_pdf(t)
     st.download_button(label="📄 Descargar Ticket PDF", data=pdf_bytes, file_name=f"Ticket_{t['folio']}.pdf", mime="application/pdf", use_container_width=True)
 
-    # --- QR CENTRADO CON CSS ---
+    # --- EL TRUCO PARA CENTRAR EL QR SIN COLUMNAS ---
     qr_img = qrcode.make(msg_wa.replace("%0A", "\n"))
     buf = BytesIO()
     qr_img.save(buf, format="PNG")
     
-    # Este bloque centra la imagen ignorando las columnas
-    st.markdown(
-        """
-        <style>
-        .centered-qr {
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            margin-top: 10px;
-        }
-        </style>
-        """, unsafe_allow_html=True
-    )
-    
-    # Mostramos el QR pequeño y centrado
-    st.columns([1, 2, 1])[1].image(buf.getvalue(), width=150)
+    # Usamos st.image con un ancho pequeño y activamos 'use_container_width=False'
+    # Streamlit por defecto centra las imágenes si no están en columnas
+    st.write("---")
+    st.image(buf.getvalue(), width=200) 
+    st.caption("Escanea el ticket")
 
     if st.button("Siguiente Cliente ✨", use_container_width=True):
         st.session_state.ultimo_ticket = None
