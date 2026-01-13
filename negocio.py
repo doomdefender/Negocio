@@ -5,97 +5,126 @@ from io import BytesIO
 from fpdf import FPDF
 import qrcode
 
-st.set_page_config(page_title="Punto de Venta Mamá", page_icon="🛍️")
+# 1. Configuración de página
+st.set_page_config(page_title="Cena Mamá", page_icon="🍳")
 
-# 1. Base de datos en memoria (Vive mientras la pestaña esté abierta)
+# 2. Base de datos en memoria (Para el reporte del día)
 if 'ventas_dia' not in st.session_state:
     st.session_state.ventas_dia = []
 if 'carrito' not in st.session_state:
     st.session_state.carrito = []
 
+# 3. Precios y Guisos
 PRECIOS = {
     "Huarache": 30.0, "Quesadilla": 30.0, "Sope": 30.0,
     "Gordita de Chicharrón": 30.0, "Refresco": 20.0, "Café": 10.0
 }
+GUISOS_LISTA = ["Chorizo", "Salchicha", "Tinga", "Bistec", "Rajas", "Champiñones"]
 
-st.title("🍳 Sistema de Ventas")
+st.title("🍳 El Sazón de Mamá")
 
-# --- INTERFAZ DE VENTA ---
-col_a, col_b = st.columns([2, 1])
+# --- SECCIÓN DE SELECCIÓN DE PRODUCTO ---
+with st.container(border=True):
+    st.subheader("🛒 Nueva Venta")
+    producto = st.selectbox("1. Elige el Producto:", list(PRECIOS.keys()))
 
-with col_a:
-    producto = st.selectbox("Producto:", list(PRECIOS.keys()))
-    cantidad = st.number_input("Cantidad:", min_value=1, value=1)
-    if st.button("➕ AGREGAR"):
-        total_item = PRECIOS[producto] * cantidad
-        st.session_state.carrito.append({
-            "Producto": producto, 
-            "Cant": cantidad, 
-            "Subtotal": total_item
-        })
+    guisos_sel = []
+    if producto in ["Huarache", "Quesadilla", "Sope"]:
+        guisos_sel = st.multiselect("2. Guisos (Máx 2):", options=GUISOS_LISTA, max_selections=2, key=f"sel_{producto}")
+    elif producto == "Gordita de Chicharrón":
+        guisos_sel = ["Chicharrón"]
+        st.info("💡 Guiso automático: Chicharrón")
 
-with col_b:
-    st.subheader("🛒 Carrito")
-    if st.session_state.carrito:
-        df_temp = pd.DataFrame(st.session_state.carrito)
-        st.dataframe(df_temp, hide_index=True)
-        total_actual = df_temp["Subtotal"].sum()
-        st.write(f"**Total: ${total_actual}**")
-        
-        if st.button("💰 COBRAR", type="primary"):
-            # Guardar en el archivo maestro del día
-            nueva_venta = {
-                "Folio": len(st.session_state.ventas_dia) + 1,
-                "Fecha": datetime.now().strftime("%H:%M:%S"),
-                "Detalle": ", ".join([f"{i['Cant']}x {i['Producto']}" for i in st.session_state.carrito]),
-                "Total": total_actual
-            }
-            st.session_state.ventas_dia.append(nueva_venta)
-            
-            # Datos para el ticket (PDF/WhatsApp)
-            st.session_state.ultimo_ticket = st.session_state.carrito.copy()
-            st.session_state.total_final = total_actual
-            st.session_state.carrito = [] # Limpiar carrito
+    cantidad = st.number_input("3. Cantidad:", min_value=1, value=1)
+
+    if st.button("➕ AGREGAR A LA CUENTA", use_container_width=True):
+        if producto in ["Huarache", "Quesadilla", "Sope"] and not guisos_sel:
+            st.error("⚠️ Por favor selecciona los guisos.")
+        else:
+            total_item = PRECIOS[producto] * cantidad
+            detalle = f"{cantidad}x {producto}" + (f" de {' y '.join(guisos_sel)}" if guisos_sel and producto != "Gordita de Chicharrón" else "")
+            st.session_state.carrito.append({"Descripción": detalle, "Precio": total_item})
             st.rerun()
 
-# --- GENERACIÓN DE TICKETS (PDF Y WHATSAPP) ---
+# --- SECCIÓN DEL CARRITO ACTUAL ---
+if st.session_state.carrito:
+    st.divider()
+    st.subheader("📝 Cuenta Actual")
+    df_c = pd.DataFrame(st.session_state.carrito)
+    st.table(df_c)
+    total_venta = df_c["Precio"].sum()
+    st.write(f"## TOTAL: ${total_venta}")
+
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("🗑️ VACIAR"):
+            st.session_state.carrito = []
+            st.rerun()
+    with col2:
+        if st.button("💰 FINALIZAR VENTA", type="primary", use_container_width=True):
+            # Guardar en el historial del día (el "archivo" del servidor)
+            resumen_txt = " + ".join(df_c["Descripción"].tolist())
+            st.session_state.ventas_dia.append({
+                "Hora": datetime.now().strftime("%H:%M:%S"),
+                "Productos": resumen_txt,
+                "Total": total_venta
+            })
+            # Preparar ticket
+            st.session_state.ultimo_ticket = st.session_state.carrito.copy()
+            st.session_state.total_final = total_venta
+            st.session_state.carrito = []
+            st.rerun()
+
+# --- SECCIÓN DE TICKET (PDF, WHATSAPP Y QR) ---
 if 'ultimo_ticket' in st.session_state:
     st.divider()
-    st.success(f"✅ Venta #{len(st.session_state.ventas_dia)} Guardada")
+    st.success("✅ Venta Realizada")
     
-    # Crear PDF
+    # PDF
     pdf = FPDF()
     pdf.add_page()
-    pdf.set_font("Arial", "B", 16)
-    pdf.cell(0, 10, "TICKET DE VENTA", ln=True, align="C")
-    pdf.set_font("Arial", "", 12)
-    for i in st.session_state.ultimo_ticket:
-        pdf.cell(0, 10, f"{i['Cant']}x {i['Producto']} - ${i['Subtotal']}", ln=True)
+    pdf.set_font("Helvetica", "B", 16)
+    pdf.cell(0, 10, "EL SAZON DE MAMA", ln=True, align="C")
+    pdf.set_font("Helvetica", "", 12)
+    pdf.cell(0, 10, f"Fecha: {datetime.now().strftime('%d/%m/%Y %H:%M')}", ln=True, align="C")
+    pdf.ln(5)
+    for item in st.session_state.ultimo_ticket:
+        pdf.cell(0, 10, f"{item['Descripción']} - ${item['Precio']}", ln=True)
+    pdf.ln(5)
+    pdf.set_font("Helvetica", "B", 14)
     pdf.cell(0, 10, f"TOTAL: ${st.session_state.total_final}", ln=True)
     
-    buf_pdf = BytesIO(pdf.output())
-    st.download_button("📥 Descargar Ticket PDF", buf_pdf, "ticket.pdf", "application/pdf")
-    
-    if st.button("Siguiente Cliente"):
+    pdf_buffer = BytesIO(pdf.output())
+    st.download_button("📥 Descargar Ticket (PDF)", pdf_buffer, f"ticket_{datetime.now().strftime('%H%M%S')}.pdf", "application/pdf", use_container_width=True)
+
+    # WhatsApp y QR
+    resumen_wa = f"*Cena Mamá*%0A" + "%0A".join([f"• {i['Descripción']}" for i in st.session_state.ultimo_ticket]) + f"%0A*Total: ${st.session_state.total_final}*"
+    st.link_button("📲 Enviar WhatsApp", f"https://wa.me/?text={resumen_wa}", use_container_width=True)
+
+    qr_img = qrcode.make(resumen_wa.replace("%0A", "\n"))
+    qr_buffer = BytesIO()
+    qr_img.save(qr_buffer)
+    st.image(qr_buffer.getvalue(), width=150, caption="Escanea para el ticket")
+
+    if st.button("Siguiente Orden ✨"):
         del st.session_state.ultimo_ticket
         st.rerun()
 
-# --- REPORTE FINAL DEL DÍA (El archivo que mencionas) ---
-st.divider()
+# --- REPORTE DE VENTAS DEL DÍA (ARCHIVO DESCARGABLE) ---
 if st.session_state.ventas_dia:
-    st.subheader("📊 Reporte de Ventas del Día")
-    df_ventas = pd.DataFrame(st.session_state.ventas_dia)
-    st.table(df_ventas)
+    st.divider()
+    st.subheader("📊 Reporte de Ventas")
+    df_reporte = pd.DataFrame(st.session_state.ventas_dia)
+    st.dataframe(df_reporte, hide_index=True)
     
-    # BOTÓN PARA GENERAR EL EXCEL DEL SERVIDOR
-    output = BytesIO()
-    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-        df_ventas.to_excel(writer, index=False, sheet_name='Ventas')
-    
+    st.metric("Venta Total del Día", f"${df_reporte['Total'].sum()}")
+
+    # Generar CSV (Archivo que guarda todo)
+    csv = df_reporte.to_csv(index=False).encode('utf-8')
     st.download_button(
-        label="📂 DESCARGAR EXCEL DEL DÍA",
-        data=output.getvalue(),
-        file_name=f"Reporte_{datetime.now().strftime('%d_%m_%Y')}.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        label="📂 DESCARGAR REPORTE DEL DÍA (Excel/CSV)",
+        data=csv,
+        file_name=f"Ventas_{datetime.now().strftime('%d_%m_%Y')}.csv",
+        mime='text/csv',
         use_container_width=True
     )
