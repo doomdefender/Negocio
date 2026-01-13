@@ -3,7 +3,8 @@ import pandas as pd
 from datetime import datetime
 from streamlit_gsheets import GSheetsConnection
 
-st.set_page_config(page_title="Cena Mamá - Punto de Venta", page_icon="🍳")
+# Configuración de la App
+st.set_page_config(page_title="Cena Mamá", page_icon="🍳")
 
 # Conexión con Google Sheets
 conn = st.connection("gsheets", type=GSheetsConnection)
@@ -22,77 +23,75 @@ GUISOS = ["Chorizo", "Salchicha", "Tinga", "Bistec", "Rajas", "Champiñones"]
 if 'carrito' not in st.session_state:
     st.session_state.carrito = []
 
-st.title("🍳 El Sazón de Mamá")
+st.title("🍳 Punto de Venta")
 
-# --- FORMULARIO ---
+# --- SECCIÓN: AGREGAR PRODUCTO ---
 with st.form("nuevo_item", clear_on_submit=True):
-    st.subheader("🛒 Agregar Producto")
-    
-    producto = st.selectbox("¿Qué pidió el cliente?", list(PRECIOS.keys()))
+    st.subheader("🛒 Nuevo Pedido")
+    producto = st.selectbox("Producto:", list(PRECIOS.keys()))
     
     guisos_sel = []
-    
-    # REGLA DE GUISOS
     if producto == "Gordita de Chicharrón":
         guisos_sel = ["Chicharrón"]
-        st.info("Guiso: Chicharrón (Automático)")
-        
+        st.info("Guiso: Chicharrón")
     elif producto in ["Huarache", "Quesadilla", "Sope"]:
-        guisos_sel = st.multiselect(
-            "Selecciona los guisos (Máximo 2):",
-            options=GUISOS,
-            max_selections=2
-        )
+        guisos_sel = st.multiselect("Guisos (Máx 2):", options=GUISOS, max_selections=2)
     
     cantidad = st.number_input("Cantidad:", min_value=1, step=1, value=1)
     
-    boton_agregar = st.form_submit_button("➕ AGREGAR A LA LISTA")
-
-    if boton_agregar:
-        # Validación
+    if st.form_submit_button("➕ AGREGAR"):
         if producto in ["Huarache", "Quesadilla", "Sope"] and not guisos_sel:
-            st.error("⚠️ Selecciona al menos un guiso.")
+            st.error("⚠️ Elige guiso.")
         else:
-            costo_total = PRECIOS[producto] * cantidad
-            txt_guisos = " con " + " y ".join(guisos_sel) if guisos_sel else ""
+            costo = PRECIOS[producto] * cantidad
+            txt_guisos = " de " + " y ".join(guisos_sel) if guisos_sel else ""
             detalle = f"{cantidad}x {producto}{txt_guisos}"
-            
-            st.session_state.carrito.append({"Descripción": detalle, "Precio": costo_total})
-            st.success(f"Agregado: {detalle}")
+            st.session_state.carrito.append({"Descripción": detalle, "Precio": costo})
+            st.toast(f"Agregado: {producto}")
 
-# --- CARRITO ---
+# --- SECCIÓN: CARRITO Y COBRO ---
 if st.session_state.carrito:
     st.divider()
-    st.subheader("📝 Cuenta de la Mesa")
-    
-    df_carrito = pd.DataFrame(st.session_state.carrito)
-    st.table(df_carrito)
-    
-    total_final = df_carrito["Precio"].sum()
-    st.metric("TOTAL A COBRAR", f"${total_final}")
+    df_c = pd.DataFrame(st.session_state.carrito)
+    st.table(df_c)
+    total_mesa = df_c["Precio"].sum()
+    st.write(f"### TOTAL: **${total_mesa}**")
 
-    col1, col2 = st.columns(2)
-    with col1:
-        if st.button("🗑️ VACIAR"):
+    if st.button("✅ REGISTRAR VENTA", type="primary", use_container_width=True):
+        try:
+            existente = conn.read(worksheet="Hoja1")
+            resumen = " + ".join(df_c["Descripción"].tolist())
+            nueva_venta = pd.DataFrame([{
+                "Fecha": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "Productos": resumen,
+                "Total": total_mesa
+            }])
+            actualizado = pd.concat([existente, nueva_venta], ignore_index=True)
+            conn.update(worksheet="Hoja1", data=actualizado)
             st.session_state.carrito = []
+            st.success("¡Venta guardada!")
+            st.balloons()
             st.rerun()
-            
-    with col2:
-        if st.button("✅ COBRAR Y GUARDAR", type="primary", use_container_width=True):
-            try:
-                existente = conn.read(worksheet="Hoja1")
-                resumen = " + ".join(df_carrito["Descripción"].tolist())
-                nueva_venta = pd.DataFrame([{
-                    "Fecha": datetime.now().strftime("%d/%m/%Y %H:%M"),
-                    "Productos": resumen,
-                    "Total": total_final
-                }])
-                actualizado = pd.concat([existente, nueva_venta], ignore_index=True)
-                conn.update(worksheet="Hoja1", data=actualizado)
-                
-                st.session_state.carrito = []
-                st.balloons()
-                st.success("¡Venta guardada en Google Sheets!")
-                st.rerun()
-            except:
-                st.error("Error al conectar con Google Sheets.")
+        except:
+            st.error("Error al conectar con Google Sheets.")
+
+# --- SECCIÓN: CONTEO DEL DÍA ---
+st.divider()
+st.subheader("📊 Ventas de Hoy")
+
+try:
+    df_ventas = conn.read(worksheet="Hoja1")
+    if not df_ventas.empty:
+        # Filtrar solo las ventas del día de hoy
+        df_ventas['Fecha'] = pd.to_datetime(df_ventas['Fecha'])
+        hoy = datetime.now().date()
+        ventas_hoy = df_ventas[df_ventas['Fecha'].dt.date == hoy]
+        
+        # Mostrar métricas sencillas
+        col1, col2 = st.columns(2)
+        col1.metric("Número de Ventas", len(ventas_hoy))
+        col2.metric("Total en Dinero", f"${ventas_hoy['Total'].sum()}")
+    else:
+        st.info("Aún no hay ventas en el sistema.")
+except:
+    st.write("Conecta Google Sheets para ver el conteo.")
