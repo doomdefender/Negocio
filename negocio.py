@@ -70,7 +70,7 @@ if st.session_state.carrito:
     with col2:
         if st.button("💰 FINALIZAR Y GUARDAR", type="primary", use_container_width=True):
             try:
-                # Leer historial (ttl=0 para no saltar líneas)
+                # Leer historial (ttl=0 para datos frescos)
                 try:
                     df_existente = conn.read(worksheet="Hoja1", ttl=0)
                 except:
@@ -83,7 +83,7 @@ if st.session_state.carrito:
                     "Total": total_venta
                 }])
 
-                # Unir historial con la nueva venta
+                # Acumular filas
                 df_final = pd.concat([df_existente, nueva_venta], ignore_index=True).dropna(how='all')
                 conn.update(worksheet="Hoja1", data=df_final)
                 
@@ -94,11 +94,12 @@ if st.session_state.carrito:
             except Exception as e:
                 st.error(f"Error: {e}")
 
-# --- SECCIÓN DE TICKET ---
+# --- SECCIÓN DE TICKET (PDF, WHATSAPP Y QR) ---
 if st.session_state.ultimo_ticket:
     st.divider()
     st.success("✅ Venta registrada")
     
+    # PDF
     pdf = FPDF()
     pdf.add_page()
     pdf.set_font("Helvetica", "B", 16)
@@ -115,8 +116,15 @@ if st.session_state.ultimo_ticket:
     pdf_buffer = BytesIO(pdf.output())
     st.download_button("📥 Ticket PDF", data=pdf_buffer, file_name="ticket.pdf", mime="application/pdf", use_container_width=True)
 
+    # WhatsApp
     resumen_wa = f"*Cena Mamá*%0A" + "%0A".join([f"• {i['Descripción']}" for i in st.session_state.ultimo_ticket]) + f"%0A*Total: ${st.session_state.total_final}*"
     st.link_button("📲 WhatsApp", f"https://wa.me/?text={resumen_wa}", use_container_width=True)
+
+    # --- QR DE VUELTA ---
+    qr_img = qrcode.make(resumen_wa.replace("%0A", "\n"))
+    qr_buf = BytesIO()
+    qr_img.save(qr_buf)
+    st.image(qr_buf.getvalue(), width=200, caption="Escanea para ver el ticket")
 
     if st.button("Siguiente Cliente ✨"):
         st.session_state.ultimo_ticket = None
