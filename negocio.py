@@ -115,26 +115,26 @@ if 'ultimo_ticket' in st.session_state:
     # Generar PDF
     pdf = FPDF()
     pdf.add_page()
-    pdf.set_font("Arial", "B", 16)
-    pdf.cell(0, 10, "EL SAZÓN DE MAMÁ", ln=True, align="C")
-    pdf.set_font("Arial", "", 12)
+    pdf.set_font("helvetica", "B", 16) # Cambiamos a helvetica que es más estándar
+    pdf.cell(0, 10, "EL SAZON DE MAMA", ln=True, align="C")
+    pdf.set_font("helvetica", "", 12)
     pdf.cell(0, 10, f"Fecha: {datetime.now().strftime('%d/%m/%Y %H:%M')}", ln=True, align="C")
     pdf.ln(5)
     
     for item in st.session_state.ultimo_ticket:
-        pdf.cell(0, 10, f"{item['Descripción']} - ${item['Precio']}", ln=True)
+        pdf.cell(0, 10, f"{item['Descripcion']} - ${item['Precio']}", ln=True)
     
     pdf.ln(5)
-    pdf.set_font("Arial", "B", 14)
+    pdf.set_font("helvetica", "B", 14)
     pdf.cell(0, 10, f"TOTAL: ${st.session_state.total_final}", ln=True)
 
-    # AQUÍ ESTÁ EL CAMBIO IMPORTANTE:
-    # Convertimos el PDF a bytes para que Streamlit pueda leerlo
-    pdf_bytes = pdf.output() 
+    # LA CORRECCIÓN ESTÁ AQUÍ:
+    # Obtenemos el contenido del PDF y lo convertimos a un formato que Streamlit entienda
+    pdf_output = pdf.output()
     
     st.download_button(
         label="📥 Descargar Ticket (PDF)",
-        data=bytes(pdf_bytes), # Convertimos a bytes aquí
+        data=bytearray(pdf_output), # Esto convierte el PDF en datos descargables
         file_name=f"ticket_{datetime.now().strftime('%H%M%S')}.pdf",
         mime="application/pdf",
         use_container_width=True
