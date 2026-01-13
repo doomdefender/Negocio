@@ -41,31 +41,35 @@ folio_actual = obtener_siguiente_folio()
 st.title("🌮 Punto de Venta: La Macura")
 st.subheader(f"Orden actual: #{folio_actual}")
 
+# --- FORMULARIO SIN COLUMNAS (TODO HACIA ABAJO) ---
 with st.container(border=True):
     st.write("### 🛒 Agregar Producto")
-    col1, col2 = st.columns(2)
     
-    with col1:
-        producto = st.selectbox("Producto:", list(PRECIOS.keys()))
-        cantidad = st.number_input("Cantidad:", min_value=1, value=1)
+    producto = st.selectbox("Elija el Producto:", list(PRECIOS.keys()))
     
-    with col2:
-        guisos = []
-        if producto in ["Huarache", "Quesadilla", "Sope"]:
-            guisos = st.multiselect("Guisos:", options=GUISOS_LISTA, max_selections=2)
-        elif producto == "Gordita de Chicharrón":
-            guisos = ["Chicharrón"]
+    # Los guisos aparecen justo debajo del producto
+    guisos = []
+    if producto in ["Huarache", "Quesadilla", "Sope"]:
+        guisos = st.multiselect("Seleccione Guisos:", options=GUISOS_LISTA, max_selections=2)
+    elif producto == "Gordita de Chicharrón":
+        guisos = ["Chicharrón"]
+        st.info("Incluye Chicharrón")
 
-    if st.button("➕ AGREGAR", use_container_width=True):
+    cantidad = st.number_input("Cantidad:", min_value=1, value=1)
+
+    if st.button("➕ AGREGAR A LA LISTA", use_container_width=True):
         total_item = PRECIOS[producto] * cantidad
         detalle = f"{cantidad}x {producto}"
-        if guisos: detalle += f" ({', '.join(guisos)})"
+        if guisos: 
+            detalle += f" ({', '.join(guisos)})"
+            
         st.session_state.carrito.append({"Descripción": detalle, "Precio": total_item})
         st.rerun()
 
 # Resumen de compra y guardado
 if st.session_state.carrito:
     st.divider()
+    st.write("### 📝 Resumen de la Orden")
     df_carrito = pd.DataFrame(st.session_state.carrito)
     st.table(df_carrito)
     total_venta = df_carrito["Precio"].sum()
@@ -108,7 +112,11 @@ if st.session_state.ultimo_ticket:
     qr_img = qrcode.make(msg.replace("%0A", "\n"))
     buf = BytesIO()
     qr_img.save(buf)
-    st.image(buf.getvalue(), caption="Ticket QR", width=200)
+    
+    # QR centrado
+    c1, c2, c3 = st.columns([1, 2, 1])
+    with c2:
+        st.image(buf.getvalue(), caption="Ticket QR", use_container_width=True)
 
     if st.button("Siguiente Cliente"):
         st.session_state.ultimo_ticket = None
