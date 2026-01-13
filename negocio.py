@@ -97,7 +97,7 @@ if st.session_state.ultimo_ticket:
     st.divider()
     st.success("✅ Venta registrada")
     
-    # Generar PDF
+    # PDF
     pdf = FPDF()
     pdf.add_page()
     pdf.set_font("Helvetica", "B", 16)
@@ -115,15 +115,19 @@ if st.session_state.ultimo_ticket:
     resumen_wa = f"*La Macura*%0A" + "%0A".join([f"• {i['Descripción']}" for i in st.session_state.ultimo_ticket]) + f"%0A*Total: ${st.session_state.total_final}*"
     st.link_button("📲 WhatsApp", f"https://wa.me/?text={resumen_wa}", use_container_width=True)
 
-    # --- QR CENTRADO ---
+    # --- QR CENTRADO Y MÁS PEQUEÑO ---
     qr_img = qrcode.make(resumen_wa.replace("%0A", "\n"))
     qr_buf = BytesIO()
     qr_img.save(qr_buf)
     
-    # Creamos 3 columnas, la del medio es para el QR
-    col_a, col_b, col_c = st.columns([1, 2, 1])
-    with col_b:
-        st.image(qr_buf.getvalue(), caption="Ticket de La Macura", use_container_width=True)
+    # Ajustamos las columnas para que la central sea más angosta (el QR será más chico)
+    # [2, 1, 2] significa que las laterales son grandes y el centro pequeño
+    c1, c2, c3 = st.columns([2, 1, 2])
+    with c2:
+        st.image(qr_buf.getvalue(), use_container_width=True)
+    
+    # Texto centrado debajo del QR chico
+    st.markdown("<p style='text-align: center; color: gray;'>Ticket QR</p>", unsafe_allow_html=True)
 
     if st.button("Siguiente Cliente ✨"):
         st.session_state.ultimo_ticket = None
