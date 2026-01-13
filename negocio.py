@@ -17,18 +17,19 @@ PRECIOS = {
 }
 GUISOS_LISTA = ["Pollo Deshebrado", "Chorizo", "Salchicha", "Tinga", "Bistec", "Rajas", "Champiñones"]
 
-# --- FUNCIÓN DE CONTEO EN TIEMPO REAL ---
-# Esta función no guarda nada en memoria, siempre lee el Excel actual
-def calcular_folio_proximo():
+# --- FUNCIÓN PARA DETECTAR EL SIGUIENTE NÚMERO (EL 10) ---
+def obtener_proximo_folio():
     try:
-        df_temp = conn.read(worksheet="Hoja1", ttl=0) # ttl=0 obliga a leer el dato más nuevo
-        df_temp = df_temp.dropna(how='all')
+        # Leemos el Excel sin caché para ver que el último es 9
+        df_temp = conn.read(worksheet="Hoja1", ttl=0).dropna(how='all')
         
         if df_temp.empty:
             return 1
         
-        # Buscamos la columna de pedidos
+        # Buscamos en la columna 'Pedido' (o la última columna)
         col = 'Pedido' if 'Pedido' in df_temp.columns else df_temp.columns[-1]
+        
+        # Obtenemos el máximo actual (9) y le sumamos 1
         ultimo_grabado = pd.to_numeric(df_temp[col], errors='coerce').max()
         
         if pd.isna(ultimo_grabado):
@@ -38,23 +39,23 @@ def calcular_folio_proximo():
     except:
         return 1
 
-# Calculamos el folio CADA VEZ que se corre el código
-folio_cliente_actual = calcular_folio_proximo()
+# Calculamos el número de folio CADA VEZ que se refresca la app
+folio_actual = obtener_proximo_folio()
 
-# --- ESTADOS DE SESIÓN (Solo para el carrito y el ticket) ---
+# --- ESTADOS DE SESIÓN ---
 if 'carrito' not in st.session_state:
     st.session_state.carrito = []
 if 'ultimo_ticket' not in st.session_state:
     st.session_state.ultimo_ticket = None
 
 st.title("🌮 La Macura")
-# Mostramos el número que realmente sigue
-st.info(f"📋 Atendiendo al Pedido: **#{folio_cliente_actual}**")
+# Mensaje claro del pedido que se está tomando
+st.success(f"📋 Tomando datos para el **Pedido: #{folio_actual}**")
 
 # --- SECCIÓN DE SELECCIÓN ---
 with st.container(border=True):
     st.subheader("🛒 Nueva Venta")
-    producto = st.selectbox("1. Elige el Producto:", list(PRECIOS.keys()))
+    producto = st.selectbox("1. Producto:", list(PRECIOS.keys()))
     
     guisos_sel = []
     if producto in ["Huarache", "Quesadilla", "Sope"]:
@@ -64,7 +65,7 @@ with st.container(border=True):
 
     cantidad = st.number_input("3. Cantidad:", min_value=1, value=1)
 
-    if st.button("➕ AGREGAR AL CARRITO", use_container_width=True):
+    if st.button("➕ AGREGAR", use_container_width=True):
         total_item = PRECIOS[producto] * cantidad
         detalle = f"{cantidad}x {producto}" + (f" de {' y '.join(guisos_sel)}" if guisos_sel and producto != "Gordita de Chicharrón" else "")
         st.session_state.carrito.append({"Descripción": detalle, "Precio": total_item})
@@ -77,8 +78,8 @@ if st.session_state.carrito:
     st.table(df_c)
     total_v = df_c["Precio"].sum()
     
-    # El botón confirma visualmente que se guardará como el 10 (o el que siga)
-    if st.button(f"💰 GUARDAR COMO PEDIDO #{folio_cliente_actual}", type="primary", use_container_width=True):
+    # El botón confirma que se guardará como el 10
+    if st.button(f"💰 GUARDAR COMO PEDIDO #{folio_actual}", type="primary", use_container_width=True):
         try:
             df_existente = conn.read(worksheet="Hoja1", ttl=0).dropna(how='all')
             resumen = " + ".join(df_c["Descripción"].tolist())
@@ -87,33 +88,34 @@ if st.session_state.carrito:
                 "Fecha": datetime.now().strftime("%d/%m/%Y %H:%M:%S"),
                 "Productos": resumen,
                 "Total": total_v,
-                "Pedido": folio_cliente_actual
+                "Pedido": folio_actual # Aquí se guarda el 10
             }])
 
             df_final = pd.concat([df_existente, nueva_fila], ignore_index=True)
             conn.update(worksheet="Hoja1", data=df_final)
             
-            # Guardamos para el ticket y limpiamos
+            # Guardamos para el ticket
             st.session_state.ultimo_ticket = {
                 "items": st.session_state.carrito.copy(),
                 "total": total_v,
-                "folio": folio_cliente_actual
+                "folio": folio_actual
             }
             st.session_state.carrito = []
             st.rerun()
         except Exception as e:
-            st.error(f"Error: {e}")
+            st.error(f"Error al guardar: {e}")
 
 # --- SECCIÓN DE TICKET ---
 if st.session_state.ultimo_ticket:
-    tkt = st.session_state.ultimo_ticket
+    t = st.session_state.ultimo_ticket
     st.divider()
-    st.success(f"✅ Pedido #{tkt['folio']} Guardado")
+    st.balloons()
+    st.success(f"✅ ¡Pedido #{t['folio']} registrado!")
     
-    resumen_wa = f"*La Macura - Pedido #{tkt['folio']}*%0A" + "%0A".join([f"• {i['Descripción']}" for i in tkt['items']]) + f"%0A*Total: ${tkt['total']}*"
+    resumen_wa = f"*La Macura - Pedido #{t['folio']}*%0A" + "%0A".join([f"• {i['Descripción']}" for i in t['items']]) + f"%0A*Total: ${t['total']}*"
     st.link_button("📲 Enviar WhatsApp", f"https://wa.me/?text={resumen_wa}", use_container_width=True)
 
-    # QR Centrado
+    # QR Pequeño
     qr_img = qrcode.make(resumen_wa.replace("%0A", "\n"))
     qr_buf = BytesIO()
     qr_img.save(qr_buf)
