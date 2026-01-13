@@ -30,22 +30,41 @@ with st.form("nuevo_item", clear_on_submit=True):
     st.subheader("🛒 Nuevo Pedido")
     producto = st.selectbox("Producto:", list(PRECIOS.keys()))
     
+    # LÓGICA DE GUISOS CORREGIDA
     guisos_sel = []
-    if producto == "Gordita de Chicharrón":
-        guisos_sel = ["Chicharrón"]
-        st.info("Guiso: Chicharrón")
-    elif producto in ["Huarache", "Quesadilla", "Sope"]:
-        guisos_sel = st.multiselect("Guisos (Máx 2):", options=GUISOS, max_selections=2)
     
+    if producto == "Gordita de Chicharrón":
+        # Para la gordita, forzamos que el guiso sea Chicharrón y NO mostramos el multiselect
+        guisos_sel = ["Chicharrón"]
+        st.info("✨ Guiso incluido: Chicharrón")
+        
+    elif producto in ["Huarache", "Quesadilla", "Sope"]:
+        # Solo para estos productos mostramos el selector de hasta 2 guisos
+        guisos_sel = st.multiselect(
+            "Selecciona guisos (Máx 2):", 
+            options=GUISOS, 
+            max_selections=2
+        )
+    
+    # Si es refresco o café, simplemente no entra en ningún 'if' y guisos_sel se queda vacío []
+
     cantidad = st.number_input("Cantidad:", min_value=1, step=1, value=1)
     
-    if st.form_submit_button("➕ AGREGAR"):
+    if st.form_submit_button("➕ AGREGAR AL CARRITO"):
+        # Validación de seguridad
         if producto in ["Huarache", "Quesadilla", "Sope"] and not guisos_sel:
-            st.error("⚠️ Elige guiso.")
+            st.error("⚠️ Por favor, selecciona al menos un guiso.")
         else:
             costo = PRECIOS[producto] * cantidad
-            txt_guisos = " de " + " y ".join(guisos_sel) if guisos_sel else ""
-            detalle = f"{cantidad}x {producto}{txt_guisos}"
+            # Formatear el texto para el ticket
+            if producto == "Gordita de Chicharrón":
+                detalle = f"{cantidad}x {producto}"
+            elif guisos_sel:
+                txt_guisos = " de " + " y ".join(guisos_sel)
+                detalle = f"{cantidad}x {producto}{txt_guisos}"
+            else:
+                detalle = f"{cantidad}x {producto}"
+                
             st.session_state.carrito.append({"Descripción": detalle, "Precio": costo})
             st.toast(f"Agregado: {producto}")
 
@@ -82,16 +101,14 @@ st.subheader("📊 Ventas de Hoy")
 try:
     df_ventas = conn.read(worksheet="Hoja1")
     if not df_ventas.empty:
-        # Filtrar solo las ventas del día de hoy
         df_ventas['Fecha'] = pd.to_datetime(df_ventas['Fecha'])
         hoy = datetime.now().date()
         ventas_hoy = df_ventas[df_ventas['Fecha'].dt.date == hoy]
         
-        # Mostrar métricas sencillas
         col1, col2 = st.columns(2)
         col1.metric("Número de Ventas", len(ventas_hoy))
         col2.metric("Total en Dinero", f"${ventas_hoy['Total'].sum()}")
     else:
-        st.info("Aún no hay ventas en el sistema.")
+        st.info("Aún no hay ventas registradas.")
 except:
-    st.write("Conecta Google Sheets para ver el conteo.")
+    st.write("Conecta Google Sheets para ver el resumen.")
