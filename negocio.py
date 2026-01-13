@@ -17,32 +17,22 @@ PRECIOS = {
 }
 GUISOS_LISTA = ["Pollo Deshebrado", "Chorizo", "Salchicha", "Tinga", "Bistec", "Rajas", "Champiñones"]
 
-# --- FUNCIÓN PARA DETECTAR EL 9 ---
+# --- FUNCIÓN CORREGIDA PARA QUE DE EL #9 ---
 def obtener_siguiente_folio():
     try:
+        # Leemos el Excel ignorando el caché (ttl=0)
         df_temp = conn.read(worksheet="Hoja1", ttl=0)
+        # Quitamos filas que estén totalmente vacías
         df_temp = df_temp.dropna(how='all')
         
-        if df_temp.empty:
-            return 1
-        
-        # Intentamos buscar en la columna 'Pedido' o en la última columna disponible
-        if 'Pedido' in df_temp.columns:
-            columna_busqueda = 'Pedido'
-        else:
-            columna_busqueda = df_temp.columns[-1] # La última columna
-            
-        # Convertimos a número, sacamos el máximo (que sería 8) y sumamos 1
-        ultimo_valor = pd.to_numeric(df_temp[columna_busqueda], errors='coerce').max()
-        
-        if pd.isna(ultimo_valor):
-            return len(df_temp) + 1
-            
-        return int(ultimo_valor) + 1
+        # Si tienes 7 registros + 1 fila de encabezado, len() es 7.
+        # Para que el siguiente sea 9, sumamos 2.
+        return len(df_temp) + 2
     except:
+        # Si falla o está vacío, empezamos en 1
         return 1
 
-# Inicializar estados
+# Inicializar estados de sesión
 if 'carrito' not in st.session_state:
     st.session_state.carrito = []
 if 'ultimo_ticket' not in st.session_state:
@@ -51,7 +41,7 @@ if 'folio_actual' not in st.session_state:
     st.session_state.folio_actual = obtener_siguiente_folio()
 
 st.title("🌮 La Macura")
-st.info(f"🔢 Pedido actual: **#{st.session_state.folio_actual}**")
+st.info(f"📋 Pedido actual: **#{st.session_state.folio_actual}**")
 
 # --- SECCIÓN DE SELECCIÓN ---
 with st.container(border=True):
@@ -60,7 +50,7 @@ with st.container(border=True):
     
     guisos_sel = []
     if producto in ["Huarache", "Quesadilla", "Sope"]:
-        guisos_sel = st.multiselect("Guisos:", options=GUISOS_LISTA, max_selections=2)
+        guisos_sel = st.multiselect("Guisos (Máx 2):", options=GUISOS_LISTA, max_selections=2)
     elif producto == "Gordita de Chicharrón":
         guisos_sel = ["Chicharrón"]
 
@@ -84,12 +74,11 @@ if st.session_state.carrito:
             df_existente = conn.read(worksheet="Hoja1", ttl=0).dropna(how='all')
             resumen = " + ".join(df_c["Descripción"].tolist())
             
-            # Aseguramos que el nuevo dato mantenga el orden de tus columnas
             nueva_fila = pd.DataFrame([{
+                "Pedido": st.session_state.folio_actual,
                 "Fecha": datetime.now().strftime("%d/%m/%Y %H:%M:%S"),
                 "Productos": resumen,
-                "Total": total_v,
-                "Pedido": st.session_state.folio_actual
+                "Total": total_v
             }])
 
             df_final = pd.concat([df_existente, nueva_fila], ignore_index=True)
@@ -106,13 +95,13 @@ if st.session_state.carrito:
 # --- TICKET ---
 if st.session_state.ultimo_ticket:
     st.divider()
-    st.success(f"✅ Pedido #{st.session_state.folio_final} guardado")
+    st.success(f"✅ Pedido #{st.session_state.folio_final} registrado")
     
     resumen_wa = f"*La Macura - Pedido #{st.session_state.folio_final}*%0A" + "%0A".join([f"• {i['Descripción']}" for i in st.session_state.ultimo_ticket]) + f"%0A*Total: ${st.session_state.total_final}*"
     
     st.link_button("📲 Enviar WhatsApp", f"https://wa.me/?text={resumen_wa}", use_container_width=True)
 
-    # QR Centrado
+    # QR Pequeño y centrado
     qr_img = qrcode.make(resumen_wa.replace("%0A", "\n"))
     qr_buf = BytesIO()
     qr_img.save(qr_buf)
@@ -121,6 +110,7 @@ if st.session_state.ultimo_ticket:
         st.image(qr_buf.getvalue(), use_container_width=True)
 
     if st.button("Siguiente Cliente ✨"):
+        # Recalcula el folio para el próximo
         st.session_state.folio_actual = obtener_siguiente_folio()
         st.session_state.ultimo_ticket = None
         st.rerun()
