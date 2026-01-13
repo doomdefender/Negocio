@@ -3,13 +3,14 @@ import pandas as pd
 from datetime import datetime
 from streamlit_gsheets import GSheetsConnection
 
-# Configuración de la App
-st.set_page_config(page_title="Cena Mamá", page_icon="🍳")
+# 1. Configuración de la aplicación
+st.set_page_config(page_title="Cena Mamá - Punto de Venta", page_icon="🍳")
 
-# Conexión con Google Sheets
+# 2. Conexión con Google Sheets
+# Nota: Asegúrate de tener el link en Settings > Secrets de Streamlit Cloud
 conn = st.connection("gsheets", type=GSheetsConnection)
 
-# --- CONFIGURACIÓN ---
+# 3. Base de Datos de Precios y Guisos
 PRECIOS = {
     "Huarache": 30.0,
     "Quesadilla": 30.0,
@@ -18,97 +19,124 @@ PRECIOS = {
     "Refresco": 20.0,
     "Café": 10.0
 }
-GUISOS = ["Chorizo", "Salchicha", "Tinga", "Bistec", "Rajas", "Champiñones"]
+GUISOS_DISPONIBLES = ["Chorizo", "Salchicha", "Tinga", "Bistec", "Rajas", "Champiñones"]
 
+# 4. Inicializar memoria de la sesión (Carrito)
 if 'carrito' not in st.session_state:
     st.session_state.carrito = []
 
-st.title("🍳 Punto de Venta")
+st.title("🍳 El Sazón de Mamá")
+st.markdown("---")
 
-# --- SECCIÓN: AGREGAR PRODUCTO ---
-with st.form("nuevo_item", clear_on_submit=True):
-    st.subheader("🛒 Nuevo Pedido")
-    producto = st.selectbox("Producto:", list(PRECIOS.keys()))
+# 5. Formulario de Pedido
+with st.form("formulario_pedido", clear_on_submit=True):
+    st.subheader("🛒 Nuevo Producto")
     
-    # LÓGICA DE GUISOS CORREGIDA
+    # Selección de producto principal
+    producto = st.selectbox("¿Qué pidió el cliente?", list(PRECIOS.keys()))
+    
+    # Lógica de guisos: Solo aparece para Huarache, Quesadilla o Sope
     guisos_sel = []
     
-    if producto == "Gordita de Chicharrón":
-        # Para la gordita, forzamos que el guiso sea Chicharrón y NO mostramos el multiselect
-        guisos_sel = ["Chicharrón"]
-        st.info("✨ Guiso incluido: Chicharrón")
-        
-    elif producto in ["Huarache", "Quesadilla", "Sope"]:
-        # Solo para estos productos mostramos el selector de hasta 2 guisos
+    if producto in ["Huarache", "Quesadilla", "Sope"]:
         guisos_sel = st.multiselect(
-            "Selecciona guisos (Máx 2):", 
-            options=GUISOS, 
-            max_selections=2
+            "Selecciona guisos (Máximo 2):",
+            options=GUISOS_DISPONIBLES,
+            max_selections=2,
+            key="selector_guisos_dinamico"
         )
-    
-    # Si es refresco o café, simplemente no entra en ningún 'if' y guisos_sel se queda vacío []
+    elif producto == "Gordita de Chicharrón":
+        guisos_sel = ["Chicharrón"]
+        st.info("💡 Producto con guiso fijo: Chicharrón")
+    else:
+        # Para refresco y café no hay guisos
+        st.write("🥤 Bebida seleccionada")
 
     cantidad = st.number_input("Cantidad:", min_value=1, step=1, value=1)
     
-    if st.form_submit_button("➕ AGREGAR AL CARRITO"):
-        # Validación de seguridad
+    # Botón para añadir al carrito
+    btn_agregar = st.form_submit_button("➕ AGREGAR A LA CUENTA", use_container_width=True)
+
+    if btn_agregar:
+        # Validar que los antojitos tengan guiso
         if producto in ["Huarache", "Quesadilla", "Sope"] and not guisos_sel:
-            st.error("⚠️ Por favor, selecciona al menos un guiso.")
+            st.error("⚠️ Error: Debes elegir al menos un guiso.")
         else:
-            costo = PRECIOS[producto] * cantidad
-            # Formatear el texto para el ticket
+            total_item = PRECIOS[producto] * cantidad
+            
+            # Formatear nombre para el ticket
             if producto == "Gordita de Chicharrón":
-                detalle = f"{cantidad}x {producto}"
+                detalle_txt = f"{cantidad}x {producto}"
             elif guisos_sel:
-                txt_guisos = " de " + " y ".join(guisos_sel)
-                detalle = f"{cantidad}x {producto}{txt_guisos}"
+                guisos_str = " de " + " y ".join(guisos_sel)
+                detalle_txt = f"{cantidad}x {producto}{guisos_str}"
             else:
-                detalle = f"{cantidad}x {producto}"
-                
-            st.session_state.carrito.append({"Descripción": detalle, "Precio": costo})
-            st.toast(f"Agregado: {producto}")
+                detalle_txt = f"{cantidad}x {producto}"
+            
+            # Guardar en memoria
+            st.session_state.carrito.append({
+                "Descripción": detalle_txt, 
+                "Subtotal": total_item
+            })
+            st.toast(f"Añadido: {producto}")
 
-# --- SECCIÓN: CARRITO Y COBRO ---
+# 6. Mostrar el Carrito Actual
 if st.session_state.carrito:
-    st.divider()
-    df_c = pd.DataFrame(st.session_state.carrito)
-    st.table(df_c)
-    total_mesa = df_c["Precio"].sum()
-    st.write(f"### TOTAL: **${total_mesa}**")
+    st.write("### 📝 Cuenta Actual")
+    df_carrito = pd.DataFrame(st.session_state.carrito)
+    st.table(df_carrito)
+    
+    total_cuenta = df_carrito["Subtotal"].sum()
+    st.write(f"## TOTAL: ${total_cuenta}")
 
-    if st.button("✅ REGISTRAR VENTA", type="primary", use_container_width=True):
-        try:
-            existente = conn.read(worksheet="Hoja1")
-            resumen = " + ".join(df_c["Descripción"].tolist())
-            nueva_venta = pd.DataFrame([{
-                "Fecha": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                "Productos": resumen,
-                "Total": total_mesa
-            }])
-            actualizado = pd.concat([existente, nueva_venta], ignore_index=True)
-            conn.update(worksheet="Hoja1", data=actualizado)
+    col_a, col_b = st.columns(2)
+    with col_a:
+        if st.button("🗑️ CANCELAR PEDIDO", use_container_width=True):
             st.session_state.carrito = []
-            st.success("¡Venta guardada!")
-            st.balloons()
             st.rerun()
-        except:
-            st.error("Error al conectar con Google Sheets.")
+            
+    with col_b:
+        if st.button("💰 COBRAR Y GUARDAR", type="primary", use_container_width=True):
+            try:
+                # Leer datos de Google Sheets
+                df_google = conn.read(worksheet="Hoja1")
+                
+                # Crear la nueva fila
+                resumen_venta = " + ".join(df_carrito["Descripción"].tolist())
+                nueva_fila = pd.DataFrame([{
+                    "Fecha": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    "Productos": resumen_venta,
+                    "Total": total_cuenta
+                }])
+                
+                # Unir y subir
+                df_final = pd.concat([df_google, nueva_fila], ignore_index=True)
+                conn.update(worksheet="Hoja1", data=df_final)
+                
+                # Limpiar y celebrar
+                st.session_state.carrito = []
+                st.balloons()
+                st.success("✅ Venta registrada en Google Sheets")
+                st.rerun()
+            except Exception as e:
+                st.error("❌ Error de conexión con Google Sheets. Revisa los Secrets.")
 
-# --- SECCIÓN: CONTEO DEL DÍA ---
-st.divider()
-st.subheader("📊 Ventas de Hoy")
+# 7. Resumen de Ventas del Día
+st.markdown("---")
+st.subheader("📊 Ventas Realizadas Hoy")
 
 try:
-    df_ventas = conn.read(worksheet="Hoja1")
-    if not df_ventas.empty:
-        df_ventas['Fecha'] = pd.to_datetime(df_ventas['Fecha'])
+    df_historial = conn.read(worksheet="Hoja1")
+    if not df_historial.empty:
+        # Filtrar por fecha actual
+        df_historial['Fecha'] = pd.to_datetime(df_historial['Fecha'])
         hoy = datetime.now().date()
-        ventas_hoy = df_ventas[df_ventas['Fecha'].dt.date == hoy]
+        ventas_hoy = df_historial[df_historial['Fecha'].dt.date == hoy]
         
-        col1, col2 = st.columns(2)
-        col1.metric("Número de Ventas", len(ventas_hoy))
-        col2.metric("Total en Dinero", f"${ventas_hoy['Total'].sum()}")
+        m1, m2 = st.columns(2)
+        m1.metric("Ventas (Cuentas)", len(ventas_hoy))
+        m2.metric("Total en Caja", f"${ventas_hoy['Total'].sum()}")
     else:
-        st.info("Aún no hay ventas registradas.")
+        st.info("Aún no hay ventas en el historial.")
 except:
-    st.write("Conecta Google Sheets para ver el resumen.")
+    st.warning("⚠️ No se pudo cargar el historial. Verifica la conexión.")
