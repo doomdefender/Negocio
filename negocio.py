@@ -17,20 +17,24 @@ PRECIOS = {
 }
 GUISOS_LISTA = ["Pollo Deshebrado", "Chorizo", "Salchicha", "Tinga", "Bistec", "Rajas", "Champiñones"]
 
-# --- FUNCIÓN CORREGIDA PARA QUE DE EL #9 ---
+# --- FUNCIÓN DEFINITIVA PARA EL FOLIO ---
 def obtener_siguiente_folio():
     try:
-        # Leemos el Excel ignorando el caché (ttl=0)
+        # Leemos el Excel
         df_temp = conn.read(worksheet="Hoja1", ttl=0)
-        # Quitamos filas que estén totalmente vacías
         df_temp = df_temp.dropna(how='all')
         
-        # Si tienes 7 registros + 1 fila de encabezado, len() es 7.
-        # Para que el siguiente sea 9, sumamos 2.
-        return len(df_temp) + 2
-    except:
-        # Si falla o está vacío, empezamos en 1
-        return 1
+        if df_temp.empty:
+            return 1
+        
+        # Buscamos el número más alto en la columna 'Pedido'
+        # Si el máximo es 8, el siguiente será 9
+        ultimo_folio = pd.to_numeric(df_temp['Pedido']).max()
+        return int(ultimo_folio) + 1
+    except Exception as e:
+        # Si la columna 'Pedido' aún no existe o hay error, 
+        # contamos filas como plan de respaldo
+        return len(df_temp) + 1 if 'df_temp' in locals() else 1
 
 # Inicializar estados de sesión
 if 'carrito' not in st.session_state:
@@ -41,7 +45,7 @@ if 'folio_actual' not in st.session_state:
     st.session_state.folio_actual = obtener_siguiente_folio()
 
 st.title("🌮 La Macura")
-st.info(f"📋 Pedido actual: **#{st.session_state.folio_actual}**")
+st.info(f"🔢 Próximo Pedido: **#{st.session_state.folio_actual}**")
 
 # --- SECCIÓN DE SELECCIÓN ---
 with st.container(border=True):
@@ -101,7 +105,7 @@ if st.session_state.ultimo_ticket:
     
     st.link_button("📲 Enviar WhatsApp", f"https://wa.me/?text={resumen_wa}", use_container_width=True)
 
-    # QR Pequeño y centrado
+    # QR Centrado
     qr_img = qrcode.make(resumen_wa.replace("%0A", "\n"))
     qr_buf = BytesIO()
     qr_img.save(qr_buf)
@@ -110,7 +114,6 @@ if st.session_state.ultimo_ticket:
         st.image(qr_buf.getvalue(), use_container_width=True)
 
     if st.button("Siguiente Cliente ✨"):
-        # Recalcula el folio para el próximo
         st.session_state.folio_actual = obtener_siguiente_folio()
         st.session_state.ultimo_ticket = None
         st.rerun()
