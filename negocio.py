@@ -16,7 +16,7 @@ PRECIOS = {
 }
 GUISOS_LISTA = ["Pollo Deshebrado", "Chorizo", "Salchicha", "Tinga", "Bistec", "Rajas", "Champiñones"]
 
-# 2. Lógica de Pedido Actual (Sincronización)
+# 2. Lógica de Pedido Actual
 def obtener_siguiente_folio():
     try:
         st.cache_data.clear()
@@ -91,28 +91,39 @@ if st.session_state.carrito:
             st.rerun()
         except Exception as e: st.error(f"Error: {e}")
 
-# 6. Ticket Final (QR Centrado y PDF)
+# 6. Ticket Final (QR Centrado a la fuerza y PDF)
 if st.session_state.ultimo_ticket:
     t = st.session_state.ultimo_ticket
     st.divider()
     st.success(f"✅ Pedido #{t['folio']} guardado.")
     
-    # Botones de entrega
     msg_wa = f"*La Macura - Pedido #{t['folio']}*%0A" + "%0A".join([f"• {i['Descripción']}" for i in t['items']]) + f"%0A*TOTAL: ${t['total']}*"
     st.link_button("📲 Enviar WhatsApp", f"https://wa.me/?text={msg_wa}", use_container_width=True)
 
     pdf_bytes = generar_pdf(t)
     st.download_button(label="📄 Descargar Ticket PDF", data=pdf_bytes, file_name=f"Ticket_{t['folio']}.pdf", mime="application/pdf", use_container_width=True)
 
-    # --- QR PEQUEÑO Y CENTRADO ---
+    # --- QR CENTRADO CON CSS ---
     qr_img = qrcode.make(msg_wa.replace("%0A", "\n"))
     buf = BytesIO()
-    qr_img.save(buf)
+    qr_img.save(buf, format="PNG")
     
-    # Creamos 3 columnas y usamos la del medio (índice 1) para el QR
-    cols = st.columns([1, 1, 1]) 
-    with cols[1]:
-        st.image(buf.getvalue(), caption="QR Ticket", width=130)
+    # Este bloque centra la imagen ignorando las columnas
+    st.markdown(
+        """
+        <style>
+        .centered-qr {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            margin-top: 10px;
+        }
+        </style>
+        """, unsafe_allow_html=True
+    )
+    
+    # Mostramos el QR pequeño y centrado
+    st.columns([1, 2, 1])[1].image(buf.getvalue(), width=150)
 
     if st.button("Siguiente Cliente ✨", use_container_width=True):
         st.session_state.ultimo_ticket = None
