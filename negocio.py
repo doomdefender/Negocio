@@ -8,6 +8,8 @@ from fpdf import FPDF
 
 # 1. Configuración de página
 st.set_page_config(page_title="Cena Mamá", page_icon="🍳")
+
+# Conexión simple (Plan B)
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 # 2. Datos
@@ -60,30 +62,19 @@ if st.session_state.carrito:
             st.session_state.carrito = []
             st.rerun()
     with col2:
-        if st.button("💰 GUARDAR VENTA", type="primary", use_container_width=True):
-            try:
-                try:
-                    historial = conn.read(worksheet="Hoja1")
-                except:
-                    historial = pd.DataFrame(columns=["Fecha", "Productos", "Total"])
-                
-                resumen_txt = " + ".join(df_c["Descripción"].tolist())
-                nueva_fila = pd.DataFrame([{"Fecha": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "Productos": resumen_txt, "Total": total_venta}])
-                conn.update(worksheet="Hoja1", data=pd.concat([historial, nueva_fila], ignore_index=True))
-                
-                st.session_state.ultimo_ticket = st.session_state.carrito.copy()
-                st.session_state.total_final = total_venta
-                st.session_state.carrito = []
-                st.rerun()
-            except Exception as e:
-                st.error(f"Error al guardar: {e}")
+        if st.button("💰 FINALIZAR VENTA", type="primary", use_container_width=True):
+            # Guardamos para el ticket
+            st.session_state.ultimo_ticket = st.session_state.carrito.copy()
+            st.session_state.total_final = total_venta
+            st.session_state.carrito = []
+            st.rerun()
 
 # --- SECCIÓN DE TICKET (PDF Y QR) ---
 if 'ultimo_ticket' in st.session_state:
     st.divider()
-    st.success("✅ Venta Guardada")
+    st.success("✅ Venta Realizada")
     
-    # 1. GENERAR PDF CON BYTESIO (Solución al error de bit stream)
+    # GENERAR PDF
     pdf = FPDF()
     pdf.add_page()
     pdf.set_font("Helvetica", "B", 16)
@@ -97,7 +88,6 @@ if 'ultimo_ticket' in st.session_state:
     pdf.set_font("Helvetica", "B", 14)
     pdf.cell(0, 10, f"TOTAL: ${st.session_state.total_final}", ln=True)
     
-    # Aquí la magia: convertimos el PDF a un buffer de bytes
     pdf_output = pdf.output()
     pdf_buffer = BytesIO(pdf_output)
     
@@ -109,8 +99,8 @@ if 'ultimo_ticket' in st.session_state:
         use_container_width=True
     )
 
-    # 2. WHATSAPP Y QR
-    resumen_wa = f"*Cena Mamá*%0A" + "%0A".join([f"• {i['Descripción']}" for i in st.session_state.ultimo_ticket]) + f"%0A*Total: ${st.session_state.total_final}*"
+    # WHATSAPP Y QR
+    resumen_wa = f"*Cena Mama*%0A" + "%0A".join([f"• {i['Descripción']}" for i in st.session_state.ultimo_ticket]) + f"%0A*Total: ${st.session_state.total_final}*"
     st.link_button("📲 Enviar por WhatsApp", f"https://wa.me/?text={resumen_wa}", use_container_width=True)
 
     qr_img = qrcode.make(resumen_wa.replace("%0A", "\n"))
