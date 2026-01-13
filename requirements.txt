@@ -1,4 +1,7 @@
 streamlit
 pandas
+streamlit-gsheets
 fpdf2
-qrcode[pil]
+qrcode
+pillow
+xlsxwriter
