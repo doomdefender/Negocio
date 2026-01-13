@@ -19,16 +19,22 @@ PRECIOS = {
 }
 GUISOS_LISTA = ["Pollo Deshebrado", "Chorizo", "Salchicha", "Tinga", "Bistec", "Rajas", "Champiñones"]
 
+# --- INICIALIZAR ESTADOS ---
 if 'carrito' not in st.session_state:
     st.session_state.carrito = []
 if 'ultimo_ticket' not in st.session_state:
     st.session_state.ultimo_ticket = None
+if 'conteo_clientes' not in st.session_state:
+    # Intentamos ver cuántas ventas hay hoy en el Excel para seguir el hilo, 
+    # si no, empezamos en 1.
+    st.session_state.conteo_clientes = 1
 
 st.title("🌮 La Macura")
+st.subheader(f"👤 Cliente / Pedido actual: #{st.session_state.conteo_clientes}")
 
 # --- SECCIÓN DE SELECCIÓN ---
 with st.container(border=True):
-    st.subheader("🛒 Nueva Venta")
+    st.subheader(f"🛒 Nueva Venta")
     producto = st.selectbox("1. Elige el Producto:", list(PRECIOS.keys()), key="prod_principal")
 
     guisos_sel = []
@@ -61,74 +67,67 @@ if st.session_state.carrito:
     total_venta = df_c["Precio"].sum()
     st.write(f"## TOTAL: ${total_venta}")
 
-    col1, col2 = st.columns(2)
-    with col1:
-        if st.button("🗑️ VACIAR"):
+    if st.button("💰 FINALIZAR Y GUARDAR", type="primary", use_container_width=True):
+        try:
+            try:
+                df_existente = conn.read(worksheet="Hoja1", ttl=0)
+            except:
+                df_existente = pd.DataFrame(columns=["Venta_No", "Fecha", "Productos", "Total"])
+
+            resumen_productos = " + ".join(df_c["Descripción"].tolist())
+            nueva_venta = pd.DataFrame([{
+                "Venta_No": st.session_state.conteo_clientes,
+                "Fecha": datetime.now().strftime("%d/%m/%Y %H:%M:%S"),
+                "Productos": resumen_productos,
+                "Total": total_venta
+            }])
+
+            df_final = pd.concat([df_existente, nueva_venta], ignore_index=True).dropna(how='all')
+            conn.update(worksheet="Hoja1", data=df_final)
+            
+            st.session_state.ultimo_ticket = st.session_state.carrito.copy()
+            st.session_state.total_final = total_venta
+            st.session_state.num_pedido_final = st.session_state.conteo_clientes
             st.session_state.carrito = []
             st.rerun()
-            
-    with col2:
-        if st.button("💰 FINALIZAR Y GUARDAR", type="primary", use_container_width=True):
-            try:
-                try:
-                    df_existente = conn.read(worksheet="Hoja1", ttl=0)
-                except:
-                    df_existente = pd.DataFrame(columns=["Fecha", "Productos", "Total"])
-
-                resumen_productos = " + ".join(df_c["Descripción"].tolist())
-                nueva_venta = pd.DataFrame([{
-                    "Fecha": datetime.now().strftime("%d/%m/%Y %H:%M:%S"),
-                    "Productos": resumen_productos,
-                    "Total": total_venta
-                }])
-
-                df_final = pd.concat([df_existente, nueva_venta], ignore_index=True).dropna(how='all')
-                conn.update(worksheet="Hoja1", data=df_final)
-                
-                st.session_state.ultimo_ticket = st.session_state.carrito.copy()
-                st.session_state.total_final = total_venta
-                st.session_state.carrito = []
-                st.rerun()
-            except Exception as e:
-                st.error(f"Error: {e}")
+        except Exception as e:
+            st.error(f"Error: {e}")
 
 # --- SECCIÓN DE TICKET ---
 if st.session_state.ultimo_ticket:
     st.divider()
-    st.success("✅ Venta registrada")
+    st.success(f"✅ Venta #{st.session_state.num_pedido_final} Guardada")
     
     # PDF
     pdf = FPDF()
     pdf.add_page()
     pdf.set_font("Helvetica", "B", 16)
     pdf.cell(0, 10, "LA MACURA", ln=True, align="C")
+    pdf.set_font("Helvetica", "B", 12)
+    pdf.cell(0, 10, f"ORDEN DE SERVICIO #{st.session_state.num_pedido_final}", ln=True, align="C")
     pdf.ln(5)
     for item in st.session_state.ultimo_ticket:
         pdf.cell(0, 10, f"{item['Descripción']} - ${item['Precio']}", ln=True)
     pdf.ln(5)
-    pdf.set_font("Helvetica", "B", 14)
     pdf.cell(0, 10, f"TOTAL: ${st.session_state.total_final}", ln=True)
     
     pdf_buffer = BytesIO(pdf.output())
-    st.download_button("📥 Ticket PDF", data=pdf_buffer, file_name="ticket_macura.pdf", mime="application/pdf", use_container_width=True)
+    st.download_button("📥 Ticket PDF", data=pdf_buffer, file_name=f"pedido_{st.session_state.num_pedido_final}.pdf", mime="application/pdf", use_container_width=True)
 
-    resumen_wa = f"*La Macura*%0A" + "%0A".join([f"• {i['Descripción']}" for i in st.session_state.ultimo_ticket]) + f"%0A*Total: ${st.session_state.total_final}*"
-    st.link_button("📲 WhatsApp", f"https://wa.me/?text={resumen_wa}", use_container_width=True)
+    # WhatsApp
+    resumen_wa = f"*La Macura - Pedido #{st.session_state.num_pedido_final}*%0A" + "%0A".join([f"• {i['Descripción']}" for i in st.session_state.ultimo_ticket]) + f"%0A*Total: ${st.session_state.total_final}*"
+    st.link_button("📲 Enviar por WhatsApp", f"https://wa.me/?text={resumen_wa}", use_container_width=True)
 
-    # --- QR CENTRADO Y MÁS PEQUEÑO ---
+    # QR Pequeño
     qr_img = qrcode.make(resumen_wa.replace("%0A", "\n"))
     qr_buf = BytesIO()
     qr_img.save(qr_buf)
-    
-    # Ajustamos las columnas para que la central sea más angosta (el QR será más chico)
-    # [2, 1, 2] significa que las laterales son grandes y el centro pequeño
     c1, c2, c3 = st.columns([2, 1, 2])
     with c2:
         st.image(qr_buf.getvalue(), use_container_width=True)
-    
-    # Texto centrado debajo del QR chico
-    st.markdown("<p style='text-align: center; color: gray;'>Ticket QR</p>", unsafe_allow_html=True)
 
     if st.button("Siguiente Cliente ✨"):
+        # AQUÍ ES DONDE SUMAMOS AL CONTADOR
+        st.session_state.conteo_clientes += 1
         st.session_state.ultimo_ticket = None
         st.rerun()
