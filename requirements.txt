@@ -1,6 +1,6 @@
 streamlit
 pandas
-streamlit-gsheets
+st-gsheets-connection
 fpdf2
 qrcode
 pillow
