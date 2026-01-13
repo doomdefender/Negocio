@@ -1,36 +1,38 @@
 import streamlit as st
 import pandas as pd
 from datetime import datetime
+from streamlit_gsheets import GSheetsConnection
+import qrcode
 from io import BytesIO
 from fpdf import FPDF
-import qrcode
 
 # 1. Configuración de página
 st.set_page_config(page_title="Cena Mamá", page_icon="🍳")
 
-# 2. Base de datos en memoria (Para el reporte del día)
-if 'ventas_dia' not in st.session_state:
-    st.session_state.ventas_dia = []
-if 'carrito' not in st.session_state:
-    st.session_state.carrito = []
+# 2. Conexión OFICIAL con Service Account
+# Asegúrate de haber pegado los Secrets en Streamlit Cloud
+conn = st.connection("gsheets", type=GSheetsConnection)
 
-# 3. Precios y Guisos
+# 3. Datos de productos y guisos
 PRECIOS = {
     "Huarache": 30.0, "Quesadilla": 30.0, "Sope": 30.0,
     "Gordita de Chicharrón": 30.0, "Refresco": 20.0, "Café": 10.0
 }
 GUISOS_LISTA = ["Chorizo", "Salchicha", "Tinga", "Bistec", "Rajas", "Champiñones"]
 
+if 'carrito' not in st.session_state:
+    st.session_state.carrito = []
+
 st.title("🍳 El Sazón de Mamá")
 
-# --- SECCIÓN DE SELECCIÓN DE PRODUCTO ---
+# --- SECCIÓN DE SELECCIÓN ---
 with st.container(border=True):
     st.subheader("🛒 Nueva Venta")
     producto = st.selectbox("1. Elige el Producto:", list(PRECIOS.keys()))
 
     guisos_sel = []
     if producto in ["Huarache", "Quesadilla", "Sope"]:
-        guisos_sel = st.multiselect("2. Guisos (Máx 2):", options=GUISOS_LISTA, max_selections=2, key=f"sel_{producto}")
+        guisos_sel = st.multiselect("2. Guisos (Máx 2):", options=GUISOS_LISTA, max_selections=2)
     elif producto == "Gordita de Chicharrón":
         guisos_sel = ["Chicharrón"]
         st.info("💡 Guiso automático: Chicharrón")
@@ -46,7 +48,7 @@ with st.container(border=True):
             st.session_state.carrito.append({"Descripción": detalle, "Precio": total_item})
             st.rerun()
 
-# --- SECCIÓN DEL CARRITO ACTUAL ---
+# --- SECCIÓN DE CARRITO Y GUARDADO ---
 if st.session_state.carrito:
     st.divider()
     st.subheader("📝 Cuenta Actual")
@@ -62,23 +64,35 @@ if st.session_state.carrito:
             st.rerun()
     with col2:
         if st.button("💰 FINALIZAR VENTA", type="primary", use_container_width=True):
-            # Guardar en el historial del día (el "archivo" del servidor)
-            resumen_txt = " + ".join(df_c["Descripción"].tolist())
-            st.session_state.ventas_dia.append({
-                "Hora": datetime.now().strftime("%H:%M:%S"),
-                "Productos": resumen_txt,
-                "Total": total_venta
-            })
-            # Preparar ticket
-            st.session_state.ultimo_ticket = st.session_state.carrito.copy()
-            st.session_state.total_final = total_venta
-            st.session_state.carrito = []
-            st.rerun()
+            try:
+                # --- GUARDADO AUTOMÁTICO EN GOOGLE SHEETS ---
+                # 1. Leer datos existentes
+                existente = conn.read(worksheet="Hoja1")
+                
+                # 2. Crear nueva fila
+                resumen_txt = " + ".join(df_c["Descripción"].tolist())
+                nueva_fila = pd.DataFrame([{
+                    "Fecha": datetime.now().strftime("%d/%m/%Y %H:%M:%S"),
+                    "Productos": resumen_txt,
+                    "Total": total_venta
+                }])
+                
+                # 3. Actualizar la hoja
+                actualizado = pd.concat([existente, nueva_fila], ignore_index=True)
+                conn.update(worksheet="Hoja1", data=actualizado)
+                
+                # Guardar para el ticket y limpiar carrito
+                st.session_state.ultimo_ticket = st.session_state.carrito.copy()
+                st.session_state.total_final = total_venta
+                st.session_state.carrito = []
+                st.rerun()
+            except Exception as e:
+                st.error(f"Error al guardar en Google: {e}")
 
-# --- SECCIÓN DE TICKET (PDF, WHATSAPP Y QR) ---
+# --- SECCIÓN DE TICKET (PDF Y WHATSAPP) ---
 if 'ultimo_ticket' in st.session_state:
     st.divider()
-    st.success("✅ Venta Realizada")
+    st.success("✅ Venta Guardada en Excel")
     
     # PDF
     pdf = FPDF()
@@ -94,37 +108,18 @@ if 'ultimo_ticket' in st.session_state:
     pdf.set_font("Helvetica", "B", 14)
     pdf.cell(0, 10, f"TOTAL: ${st.session_state.total_final}", ln=True)
     
-    pdf_buffer = BytesIO(pdf.output())
-    st.download_button("📥 Descargar Ticket (PDF)", pdf_buffer, f"ticket_{datetime.now().strftime('%H%M%S')}.pdf", "application/pdf", use_container_width=True)
+    pdf_bytes = pdf.output()
+    st.download_button("📥 Descargar Ticket (PDF)", data=bytearray(pdf_bytes), file_name="ticket.pdf", mime="application/pdf", use_container_width=True)
 
     # WhatsApp y QR
     resumen_wa = f"*Cena Mamá*%0A" + "%0A".join([f"• {i['Descripción']}" for i in st.session_state.ultimo_ticket]) + f"%0A*Total: ${st.session_state.total_final}*"
-    st.link_button("📲 Enviar WhatsApp", f"https://wa.me/?text={resumen_wa}", use_container_width=True)
+    st.link_button("📲 Enviar por WhatsApp", f"https://wa.me/?text={resumen_wa}", use_container_width=True)
 
     qr_img = qrcode.make(resumen_wa.replace("%0A", "\n"))
     qr_buffer = BytesIO()
     qr_img.save(qr_buffer)
-    st.image(qr_buffer.getvalue(), width=150, caption="Escanea para el ticket")
+    st.image(qr_buffer.getvalue(), width=150)
 
     if st.button("Siguiente Orden ✨"):
         del st.session_state.ultimo_ticket
         st.rerun()
-
-# --- REPORTE DE VENTAS DEL DÍA (ARCHIVO DESCARGABLE) ---
-if st.session_state.ventas_dia:
-    st.divider()
-    st.subheader("📊 Reporte de Ventas")
-    df_reporte = pd.DataFrame(st.session_state.ventas_dia)
-    st.dataframe(df_reporte, hide_index=True)
-    
-    st.metric("Venta Total del Día", f"${df_reporte['Total'].sum()}")
-
-    # Generar CSV (Archivo que guarda todo)
-    csv = df_reporte.to_csv(index=False).encode('utf-8')
-    st.download_button(
-        label="📂 DESCARGAR REPORTE DEL DÍA (Excel/CSV)",
-        data=csv,
-        file_name=f"Ventas_{datetime.now().strftime('%d_%m_%Y')}.csv",
-        mime='text/csv',
-        use_container_width=True
-    )
