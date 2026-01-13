@@ -9,8 +9,7 @@ from fpdf import FPDF
 # 1. Configuración de página
 st.set_page_config(page_title="Cena Mamá", page_icon="🍳")
 
-# 2. Conexión OFICIAL con Service Account
-# Asegúrate de haber pegado los Secrets en Streamlit Cloud
+# 2. Conexión con Service Account (Configurada en Secrets)
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 # 3. Datos de productos y guisos
@@ -65,9 +64,11 @@ if st.session_state.carrito:
     with col2:
         if st.button("💰 FINALIZAR VENTA", type="primary", use_container_width=True):
             try:
-                # --- GUARDADO AUTOMÁTICO EN GOOGLE SHEETS ---
-                # 1. Leer datos existentes
-                existente = conn.read(worksheet="Hoja1")
+                # 1. Intentar leer datos existentes o crear base si está vacío
+                try:
+                    existente = conn.read(worksheet="Hoja1")
+                except:
+                    existente = pd.DataFrame(columns=["Fecha", "Productos", "Total"])
                 
                 # 2. Crear nueva fila
                 resumen_txt = " + ".join(df_c["Descripción"].tolist())
@@ -77,8 +78,8 @@ if st.session_state.carrito:
                     "Total": total_venta
                 }])
                 
-                # 3. Actualizar la hoja
-                actualizado = pd.concat([existente, nueva_fila], ignore_index=True)
+                # 3. Combinar y actualizar
+                actualizado = pd.concat([existente, nueva_fila], ignore_index=True).dropna(how='all')
                 conn.update(worksheet="Hoja1", data=actualizado)
                 
                 # Guardar para el ticket y limpiar carrito
@@ -87,14 +88,14 @@ if st.session_state.carrito:
                 st.session_state.carrito = []
                 st.rerun()
             except Exception as e:
-                st.error(f"Error al guardar en Google: {e}")
+                st.error(f"Error al guardar en Google Sheets: {e}")
 
 # --- SECCIÓN DE TICKET (PDF Y WHATSAPP) ---
 if 'ultimo_ticket' in st.session_state:
     st.divider()
     st.success("✅ Venta Guardada en Excel")
     
-    # PDF
+    # PDF con fpdf2 (Corregido para Streamlit)
     pdf = FPDF()
     pdf.add_page()
     pdf.set_font("Helvetica", "B", 16)
@@ -102,14 +103,24 @@ if 'ultimo_ticket' in st.session_state:
     pdf.set_font("Helvetica", "", 12)
     pdf.cell(0, 10, f"Fecha: {datetime.now().strftime('%d/%m/%Y %H:%M')}", ln=True, align="C")
     pdf.ln(5)
+    
     for item in st.session_state.ultimo_ticket:
         pdf.cell(0, 10, f"{item['Descripción']} - ${item['Precio']}", ln=True)
+    
     pdf.ln(5)
     pdf.set_font("Helvetica", "B", 14)
     pdf.cell(0, 10, f"TOTAL: ${st.session_state.total_final}", ln=True)
     
+    # Obtener bytes del PDF
     pdf_bytes = pdf.output()
-    st.download_button("📥 Descargar Ticket (PDF)", data=bytearray(pdf_bytes), file_name="ticket.pdf", mime="application/pdf", use_container_width=True)
+    
+    st.download_button(
+        label="📥 Descargar Ticket (PDF)",
+        data=pdf_bytes,
+        file_name=f"ticket_{datetime.now().strftime('%H%M%S')}.pdf",
+        mime="application/pdf",
+        use_container_width=True
+    )
 
     # WhatsApp y QR
     resumen_wa = f"*Cena Mamá*%0A" + "%0A".join([f"• {i['Descripción']}" for i in st.session_state.ultimo_ticket]) + f"%0A*Total: ${st.session_state.total_final}*"
@@ -118,7 +129,7 @@ if 'ultimo_ticket' in st.session_state:
     qr_img = qrcode.make(resumen_wa.replace("%0A", "\n"))
     qr_buffer = BytesIO()
     qr_img.save(qr_buffer)
-    st.image(qr_buffer.getvalue(), width=150)
+    st.image(qr_buffer.getvalue(), width=150, caption="Ticket Digital QR")
 
     if st.button("Siguiente Orden ✨"):
         del st.session_state.ultimo_ticket
