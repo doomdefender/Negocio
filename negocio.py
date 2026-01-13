@@ -4,6 +4,7 @@ from datetime import datetime
 from streamlit_gsheets import GSheetsConnection
 import qrcode
 from io import BytesIO
+from fpdf import FPDF
 
 # 1. Configuración inicial
 st.set_page_config(page_title="La Macura", page_icon="🌮")
@@ -15,7 +16,7 @@ PRECIOS = {
 }
 GUISOS_LISTA = ["Pollo Deshebrado", "Chorizo", "Salchicha", "Tinga", "Bistec", "Rajas", "Champiñones"]
 
-# 2. Lógica de Folio (Sincronizado)
+# 2. Lógica de Folio Sincronizado
 def obtener_siguiente_folio():
     try:
         st.cache_data.clear()
@@ -31,7 +32,26 @@ if 'ultimo_ticket' not in st.session_state: st.session_state.ultimo_ticket = Non
 
 folio_actual = obtener_siguiente_folio()
 
-# 3. Interfaz de Usuario
+# 3. Función para Crear PDF
+def generar_pdf(tkt):
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font("Arial", "B", 16)
+    pdf.cell(0, 10, "LA MACURA", ln=True, align="C")
+    pdf.set_font("Arial", "", 12)
+    pdf.cell(0, 10, f"Pedido: #{tkt['folio']}", ln=True, align="C")
+    pdf.cell(0, 10, f"Fecha: {datetime.now().strftime('%d/%m/%Y %H:%M')}", ln=True, align="C")
+    pdf.ln(5)
+    pdf.cell(0, 0, "", "T", ln=True)
+    pdf.ln(5)
+    for item in tkt['items']:
+        pdf.cell(0, 10, f"- {item['Descripción']}: ${item['Precio']}", ln=True)
+    pdf.ln(5)
+    pdf.set_font("Arial", "B", 14)
+    pdf.cell(0, 10, f"TOTAL: ${tkt['total']}", ln=True, align="R")
+    return pdf.output(dest='S').encode('latin-1')
+
+# 4. Interfaz de Usuario
 st.title("🌮 La Macura")
 st.subheader(f"Orden actual: #{folio_actual}")
 
@@ -39,7 +59,6 @@ with st.container(border=True):
     st.write("### 🛒 Agregar Producto")
     producto = st.selectbox("Elija el Producto:", list(PRECIOS.keys()))
     
-    # Guisos debajo del producto
     guisos = []
     if producto in ["Huarache", "Quesadilla", "Sope"]:
         guisos = st.multiselect("Seleccione Guisos:", options=GUISOS_LISTA, max_selections=2)
@@ -54,7 +73,7 @@ with st.container(border=True):
         st.session_state.carrito.append({"Descripción": detalle, "Precio": PRECIOS[producto] * cantidad})
         st.rerun()
 
-# 4. Resumen y Guardado
+# 5. Resumen y Guardado
 if st.session_state.carrito:
     st.divider()
     df_c = pd.DataFrame(st.session_state.carrito)
@@ -74,25 +93,29 @@ if st.session_state.carrito:
             st.rerun()
         except Exception as e: st.error(f"Error: {e}")
 
-# 5. Ticket y QR Pequeño
+# 6. Ticket, PDF y QR
 if st.session_state.ultimo_ticket:
     t = st.session_state.ultimo_ticket
     st.divider()
     st.success(f"✅ Pedido #{t['folio']} guardado.")
     
+    # WhatsApp
     msg = f"*La Macura - Pedido #{t['folio']}*%0A" + "%0A".join([f"• {i['Descripción']}" for i in t['items']]) + f"%0A*TOTAL: ${t['total']}*"
     st.link_button("📲 Enviar WhatsApp", f"https://wa.me/?text={msg}", use_container_width=True)
 
-    # --- GENERACIÓN DE QR PEQUEÑO ---
+    # PDF
+    pdf_bytes = generar_pdf(t)
+    st.download_button(label="📄 Descargar Ticket PDF", data=pdf_bytes, file_name=f"Ticket_LaMacura_{t['folio']}.pdf", mime="application/pdf", use_container_width=True)
+
+    # QR Pequeño
     qr_img = qrcode.make(msg.replace("%0A", "\n"))
     buf = BytesIO()
     qr_img.save(buf)
     
-    # Usamos columnas para centrarlo y le damos un width de 180 (pequeño)
     col_izq, col_centro, col_der = st.columns([1, 1, 1])
     with col_centro:
-        st.image(buf.getvalue(), caption="Ticket QR", width=180)
+        st.image(buf.getvalue(), caption="QR Ticket", width=150)
 
-    if st.button("Siguiente Cliente"):
+    if st.button("Siguiente Cliente ✨", use_container_width=True):
         st.session_state.ultimo_ticket = None
         st.rerun()
