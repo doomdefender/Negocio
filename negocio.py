@@ -3,13 +3,13 @@ import pandas as pd
 from datetime import datetime
 from streamlit_gsheets import GSheetsConnection
 import qrcode
-from io import BytesIO
+from io import BytesIO  # <-- Esto es lo que arregla el error del botón
 from fpdf import FPDF
 
 # 1. Configuración de página
 st.set_page_config(page_title="Cena Mamá", page_icon="🍳")
 
-# 2. Conexión con Service Account (Configurada en Secrets)
+# 2. Conexión con Google Sheets
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 # 3. Datos de productos y guisos
@@ -64,13 +64,13 @@ if st.session_state.carrito:
     with col2:
         if st.button("💰 FINALIZAR VENTA", type="primary", use_container_width=True):
             try:
-                # 1. Intentar leer datos existentes o crear base si está vacío
+                # 1. Leer o crear base
                 try:
                     existente = conn.read(worksheet="Hoja1")
                 except:
                     existente = pd.DataFrame(columns=["Fecha", "Productos", "Total"])
                 
-                # 2. Crear nueva fila
+                # 2. Nueva fila
                 resumen_txt = " + ".join(df_c["Descripción"].tolist())
                 nueva_fila = pd.DataFrame([{
                     "Fecha": datetime.now().strftime("%d/%m/%Y %H:%M:%S"),
@@ -78,24 +78,24 @@ if st.session_state.carrito:
                     "Total": total_venta
                 }])
                 
-                # 3. Combinar y actualizar
+                # 3. Actualizar
                 actualizado = pd.concat([existente, nueva_fila], ignore_index=True).dropna(how='all')
                 conn.update(worksheet="Hoja1", data=actualizado)
                 
-                # Guardar para el ticket y limpiar carrito
+                # Preparar para el ticket
                 st.session_state.ultimo_ticket = st.session_state.carrito.copy()
                 st.session_state.total_final = total_venta
                 st.session_state.carrito = []
                 st.rerun()
             except Exception as e:
-                st.error(f"Error al guardar en Google Sheets: {e}")
+                st.error(f"Error al guardar: {e}")
 
-# --- SECCIÓN DE TICKET (PDF Y WHATSAPP) ---
+# --- SECCIÓN DE TICKET ---
 if 'ultimo_ticket' in st.session_state:
     st.divider()
-    st.success("✅ Venta Guardada en Excel")
+    st.success("✅ Venta Guardada")
     
-    # PDF con fpdf2 (Corregido para Streamlit)
+    # PDF
     pdf = FPDF()
     pdf.add_page()
     pdf.set_font("Helvetica", "B", 16)
@@ -103,20 +103,19 @@ if 'ultimo_ticket' in st.session_state:
     pdf.set_font("Helvetica", "", 12)
     pdf.cell(0, 10, f"Fecha: {datetime.now().strftime('%d/%m/%Y %H:%M')}", ln=True, align="C")
     pdf.ln(5)
-    
     for item in st.session_state.ultimo_ticket:
         pdf.cell(0, 10, f"{item['Descripción']} - ${item['Precio']}", ln=True)
-    
     pdf.ln(5)
     pdf.set_font("Helvetica", "B", 14)
     pdf.cell(0, 10, f"TOTAL: ${st.session_state.total_final}", ln=True)
     
-    # Obtener bytes del PDF
+    # --- ARREGLO DEL BOTÓN ---
     pdf_bytes = pdf.output()
+    pdf_buffer = BytesIO(pdf_bytes) # Aquí está la magia
     
     st.download_button(
         label="📥 Descargar Ticket (PDF)",
-        data=pdf_bytes,
+        data=pdf_buffer,
         file_name=f"ticket_{datetime.now().strftime('%H%M%S')}.pdf",
         mime="application/pdf",
         use_container_width=True
@@ -127,9 +126,9 @@ if 'ultimo_ticket' in st.session_state:
     st.link_button("📲 Enviar por WhatsApp", f"https://wa.me/?text={resumen_wa}", use_container_width=True)
 
     qr_img = qrcode.make(resumen_wa.replace("%0A", "\n"))
-    qr_buffer = BytesIO()
-    qr_img.save(qr_buffer)
-    st.image(qr_buffer.getvalue(), width=150, caption="Ticket Digital QR")
+    qr_buf = BytesIO()
+    qr_img.save(qr_buf)
+    st.image(qr_buf.getvalue(), width=150)
 
     if st.button("Siguiente Orden ✨"):
         del st.session_state.ultimo_ticket
