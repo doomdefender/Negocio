@@ -23,7 +23,7 @@ GUISOS_LISTA = ["Chorizo", "Salchicha", "Tinga", "Bistec", "Rajas", "Champiñone
 if 'carrito' not in st.session_state:
     st.session_state.carrito = []
 
-st.title("🍳 El Sazón de Mamá")
+st.title("🍳 Punto de venta")
 
 # --- ÁREA DE SELECCIÓN (Fuera del form para que sea dinámica) ---
 st.subheader("🛒 Nuevo Producto")
