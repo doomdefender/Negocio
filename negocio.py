@@ -2,70 +2,49 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime
 from streamlit_gsheets import GSheetsConnection
+import qrcode
+from io import BytesIO
+from fpdf import FPDF
 
 # 1. Configuración
 st.set_page_config(page_title="Cena Mamá", page_icon="🍳")
-
-# 2. Conexión
 conn = st.connection("gsheets", type=GSheetsConnection)
 
-# 3. Datos
+# 2. Datos
 PRECIOS = {
-    "Huarache": 30.0,
-    "Quesadilla": 30.0,
-    "Sope": 30.0,
-    "Gordita de Chicharrón": 30.0,
-    "Refresco": 20.0,
-    "Café": 10.0
+    "Huarache": 30.0, "Quesadilla": 30.0, "Sope": 30.0,
+    "Gordita de Chicharrón": 30.0, "Refresco": 20.0, "Café": 10.0
 }
 GUISOS_LISTA = ["Chorizo", "Salchicha", "Tinga", "Bistec", "Rajas", "Champiñones"]
 
 if 'carrito' not in st.session_state:
     st.session_state.carrito = []
 
-st.title("🍳 Punto de venta")
+st.title("🍳 El Sazón de Mamá")
 
-# --- ÁREA DE SELECCIÓN (Fuera del form para que sea dinámica) ---
+# --- SELECCIÓN DE PRODUCTO ---
 st.subheader("🛒 Nuevo Producto")
 producto = st.selectbox("1. Elige el Producto:", list(PRECIOS.keys()))
 
 guisos_sel = []
-
-# Aquí está el truco: se muestra u oculta según el producto seleccionado
 if producto in ["Huarache", "Quesadilla", "Sope"]:
-    guisos_sel = st.multiselect(
-        "2. Selecciona guisos (Máx 2):",
-        options=GUISOS_LISTA,
-        max_selections=2,
-        key=f"selector_{producto}" # Llave única por producto
-    )
+    guisos_sel = st.multiselect("2. Guisos (Máx 2):", options=GUISOS_LISTA, max_selections=2, key=f"sel_{producto}")
 elif producto == "Gordita de Chicharrón":
     guisos_sel = ["Chicharrón"]
-    st.info("💡 Guiso automático: Chicharrón")
-else:
-    st.write("🥤 Sin guisos para esta bebida.")
+    st.info("💡 Guiso: Chicharrón")
 
 cantidad = st.number_input("3. Cantidad:", min_value=1, value=1)
 
-# BOTÓN PARA AGREGAR (Ahora es un botón normal, no de formulario)
 if st.button("➕ AGREGAR A LA CUENTA", use_container_width=True):
     if producto in ["Huarache", "Quesadilla", "Sope"] and not guisos_sel:
-        st.error("⚠️ Por favor selecciona los guisos.")
+        st.error("⚠️ Elige guisos.")
     else:
         total = PRECIOS[producto] * cantidad
-        # Formato de texto
-        if producto == "Gordita de Chicharrón":
-            detalle = f"{cantidad}x {producto}"
-        elif guisos_sel:
-            detalle = f"{cantidad}x {producto} de {' y '.join(guisos_sel)}"
-        else:
-            detalle = f"{cantidad}x {producto}"
-            
+        detalle = f"{cantidad}x {producto}" + (f" de {' y '.join(guisos_sel)}" if guisos_sel and producto != "Gordita de Chicharrón" else "")
         st.session_state.carrito.append({"Descripción": detalle, "Precio": total})
-        st.success(f"Agregado: {detalle}")
-        st.rerun() # Esto limpia los campos después de agregar
+        st.rerun()
 
-# --- MOSTRAR CARRITO ---
+# --- CARRITO ---
 if st.session_state.carrito:
     st.divider()
     st.subheader("📝 Cuenta Actual")
@@ -75,40 +54,74 @@ if st.session_state.carrito:
     total_venta = df_c["Precio"].sum()
     st.write(f"## TOTAL: ${total_venta}")
 
-    c1, c2 = st.columns(2)
-    with c1:
-        if st.button("🗑️ VACIAR CUENTA"):
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("🗑️ VACIAR"):
             st.session_state.carrito = []
             st.rerun()
-    with c2:
+    with col2:
         if st.button("💰 GUARDAR VENTA", type="primary", use_container_width=True):
             try:
+                # Guardar en Google Sheets
                 historial = conn.read(worksheet="Hoja1")
                 resumen = " + ".join(df_c["Descripción"].tolist())
-                nueva_fila = pd.DataFrame([{
-                    "Fecha": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                    "Productos": resumen,
-                    "Total": total_venta
-                }])
-                actualizado = pd.concat([historial, nueva_fila], ignore_index=True)
-                conn.update(worksheet="Hoja1", data=actualizado)
+                nueva_fila = pd.DataFrame([{"Fecha": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "Productos": resumen, "Total": total_venta}])
+                conn.update(worksheet="Hoja1", data=pd.concat([historial, nueva_fila], ignore_index=True))
+                
+                # Guardar datos para el recibo antes de limpiar
+                st.session_state.ultimo_ticket = st.session_state.carrito.copy()
+                st.session_state.total_final = total_venta
                 st.session_state.carrito = []
-                st.balloons()
                 st.rerun()
             except:
-                st.error("Error al conectar con Google Sheets")
+                st.error("Error al guardar.")
 
-# --- RESUMEN DEL DÍA ---
-st.divider()
-try:
-    df_h = conn.read(worksheet="Hoja1")
-    if not df_h.empty:
-        df_h['Fecha'] = pd.to_datetime(df_h['Fecha'])
-        hoy = datetime.now().date()
-        v_hoy = df_h[df_h['Fecha'].dt.date == hoy]
-        
-        col_m1, col_m2 = st.columns(2)
-        col_m1.metric("Ventas de hoy", len(v_hoy))
-        col_m2.metric("Total en Caja", f"${v_hoy['Total'].sum()}")
-except:
-    pass
+# --- GENERACIÓN DE RECIBO (PDF Y QR) ---
+if 'ultimo_ticket' in st.session_state:
+    st.divider()
+    st.success("✅ Venta registrada con éxito")
+    
+    # 1. GENERAR PDF
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font("Arial", "B", 16)
+    pdf.cell(0, 10, "EL SAZÓN DE MAMÁ", ln=True, align="C")
+    pdf.set_font("Arial", "", 12)
+    pdf.cell(0, 10, f"Fecha: {datetime.now().strftime('%d/%m/%Y %H:%M')}", ln=True, align="C")
+    pdf.ln(5)
+    pdf.cell(0, 10, "-"*40, ln=True, align="C")
+    
+    for item in st.session_state.ultimo_ticket:
+        pdf.cell(0, 10, f"{item['Descripción']} - ${item['Precio']}", ln=True)
+    
+    pdf.ln(5)
+    pdf.set_font("Arial", "B", 14)
+    pdf.cell(0, 10, f"TOTAL A PAGAR: ${st.session_state.total_final}", ln=True)
+    pdf.set_font("Arial", "I", 10)
+    pdf.cell(0, 10, "¡Gracias por su preferencia!", ln=True, align="C")
+    
+    pdf_output = pdf.output()
+    
+    # Botón de Descarga PDF
+    st.download_button(
+        label="📥 Descargar Ticket (PDF)",
+        data=pdf_output,
+        file_name=f"ticket_{datetime.now().strftime('%H%M%S')}.pdf",
+        mime="application/pdf",
+        use_container_width=True
+    )
+
+    # 2. GENERAR QR (Para que el cliente lo escanee)
+    resumen_qr = f"Cena Mamá\nTotal: ${st.session_state.total_final}\n" + "\n".join([i['Descripción'] for i in st.session_state.ultimo_ticket])
+    qr = qrcode.make(resumen_qr)
+    buf = BytesIO()
+    qr.save(buf)
+    
+    col_qr, col_new = st.columns([1, 1])
+    with col_qr:
+        st.image(buf.getvalue(), caption="Escanea el recibo", width=150)
+    with col_new:
+        if st.button("Nueva Orden ✨"):
+            del st.session_state.ultimo_ticket
+            del st.session_state.total_final
+            st.rerun()
