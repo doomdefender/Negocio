@@ -3,102 +3,96 @@ import pandas as pd
 from datetime import datetime
 from streamlit_gsheets import GSheetsConnection
 
-# Configuración de página
 st.set_page_config(page_title="Cena Mamá - Punto de Venta", page_icon="🍳")
 
 # Conexión con Google Sheets
 conn = st.connection("gsheets", type=GSheetsConnection)
 
-# --- PRECIOS Y GUISOS ---
+# --- CONFIGURACIÓN ---
 PRECIOS = {
     "Huarache": 30.0,
     "Quesadilla": 30.0,
     "Sope": 30.0,
+    "Gordita de Chicharrón": 30.0,
     "Refresco": 20.0,
     "Café": 10.0
 }
 GUISOS = ["Chorizo", "Salchicha", "Tinga", "Bistec", "Rajas", "Champiñones"]
 
-# Memoria del carrito
 if 'carrito' not in st.session_state:
     st.session_state.carrito = []
 
 st.title("🍳 El Sazón de Mamá")
 
-# --- AREA DE PEDIDO ---
-with st.container(border=True):
-    producto = st.selectbox("1. Elige el producto:", list(PRECIOS.keys()))
+# --- FORMULARIO ---
+with st.form("nuevo_item", clear_on_submit=True):
+    st.subheader("🛒 Agregar Producto")
+    
+    producto = st.selectbox("¿Qué pidió el cliente?", list(PRECIOS.keys()))
     
     guisos_sel = []
-    # Si es un antojito, habilitar selección de guisos
-    if producto in ["Huarache", "Quesadilla", "Sope"]:
-        st.write("2. Selecciona tus guisos (Máximo 2):")
-        # Multiselect con límite de 2
-        guisos_sel = st.multiselect(
-            "Guisos:", 
-            options=GUISOS, 
-            max_selections=2,
-            placeholder="Elige hasta 2 guisos"
-        )
+    
+    # REGLA DE GUISOS
+    if producto == "Gordita de Chicharrón":
+        guisos_sel = ["Chicharrón"]
+        st.info("Guiso: Chicharrón (Automático)")
         
-        if len(guisos_sel) == 0:
-            st.warning("Selecciona al menos un guiso.")
+    elif producto in ["Huarache", "Quesadilla", "Sope"]:
+        guisos_sel = st.multiselect(
+            "Selecciona los guisos (Máximo 2):",
+            options=GUISOS,
+            max_selections=2
+        )
     
-    cantidad = st.number_input("3. ¿Cuántos son?", min_value=1, value=1, step=1)
+    cantidad = st.number_input("Cantidad:", min_value=1, step=1, value=1)
     
-    # Botón para agregar
-    if st.button("➕ AGREGAR A LA CUENTA", use_container_width=True):
-        if producto in ["Huarache", "Quesadilla", "Sope"] and len(guisos_sel) == 0:
-            st.error("Debes elegir al menos un guiso.")
+    boton_agregar = st.form_submit_button("➕ AGREGAR A LA LISTA")
+
+    if boton_agregar:
+        # Validación
+        if producto in ["Huarache", "Quesadilla", "Sope"] and not guisos_sel:
+            st.error("⚠️ Selecciona al menos un guiso.")
         else:
             costo_total = PRECIOS[producto] * cantidad
-            tipo = "Combinado" if len(guisos_sel) > 1 else "Sencillo"
-            txt_guisos = "/".join(guisos_sel)
-            detalle = f"{cantidad}x {producto} {tipo} ({txt_guisos})" if guisos_sel else f"{cantidad}x {producto}"
+            txt_guisos = " con " + " y ".join(guisos_sel) if guisos_sel else ""
+            detalle = f"{cantidad}x {producto}{txt_guisos}"
             
-            st.session_state.carrito.append({"Productos": detalle, "Total": costo_total})
-            st.toast(f"Agregado: {producto}")
+            st.session_state.carrito.append({"Descripción": detalle, "Precio": costo_total})
+            st.success(f"Agregado: {detalle}")
 
-# --- CARRITO Y COBRO ---
+# --- CARRITO ---
 if st.session_state.carrito:
     st.divider()
-    st.write("### 📝 Orden Actual")
+    st.subheader("📝 Cuenta de la Mesa")
+    
     df_carrito = pd.DataFrame(st.session_state.carrito)
     st.table(df_carrito)
     
-    total_venta = df_carrito["Total"].sum()
-    st.write(f"## TOTAL A COBRAR: ${total_venta}")
+    total_final = df_carrito["Precio"].sum()
+    st.metric("TOTAL A COBRAR", f"${total_final}")
 
     col1, col2 = st.columns(2)
     with col1:
-        if st.button("🗑️ CANCELAR"):
+        if st.button("🗑️ VACIAR"):
             st.session_state.carrito = []
             st.rerun()
+            
     with col2:
-        if st.button("💰 COBRAR Y GUARDAR", type="primary", use_container_width=True):
+        if st.button("✅ COBRAR Y GUARDAR", type="primary", use_container_width=True):
             try:
                 existente = conn.read(worksheet="Hoja1")
-                resumen = " + ".join(df_carrito["Productos"].tolist())
-                nueva_fila = pd.DataFrame([{
+                resumen = " + ".join(df_carrito["Descripción"].tolist())
+                nueva_venta = pd.DataFrame([{
                     "Fecha": datetime.now().strftime("%d/%m/%Y %H:%M"),
                     "Productos": resumen,
-                    "Total": total_venta
+                    "Total": total_final
                 }])
-                actualizado = pd.concat([existente, nueva_fila], ignore_index=True)
+                actualizado = pd.concat([existente, nueva_venta], ignore_index=True)
                 conn.update(worksheet="Hoja1", data=actualizado)
                 
                 st.session_state.carrito = []
-                st.success("✅ Venta guardada")
                 st.balloons()
+                st.success("¡Venta guardada en Google Sheets!")
                 st.rerun()
-            except Exception as e:
-                st.error("Error al guardar. Revisa la conexión a Google Sheets.")
-
-# --- REPORTE ---
-st.divider()
-if st.checkbox("Ver reporte de hoy"):
-    try:
-        reporte = conn.read(worksheet="Hoja1")
-        st.dataframe(reporte.sort_index(ascending=False))
-    except:
-        st.info("Aún no hay datos.")
+            except:
+                st.error("Error al conectar con Google Sheets.")
